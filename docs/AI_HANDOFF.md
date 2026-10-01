@@ -152,5 +152,6 @@
 ## 2026-10-01 continuation: root cause of profile redirect
 
 - Browser extension storage diagnostics captured the actual sequence: `statusNum code=2002` -> `会话自愈调度` -> `/login` -> `/setting/profile`.
-- The saved configuration had direct-login enabled but no protocol login username. The recovery branch previously checked only the enabled flag, so it sent an incomplete session to `/login`.
-- Recovery now requires a non-empty configured login username before navigating to `/login`; an empty account leaves the user on `/radiation` and records the failure without redirecting.
+- The saved configuration had direct-login enabled but no protocol login username. More fundamentally, a logged-in `/radiation` page should never be redirected because one read-only request returned 2002.
+- Recovery now keeps the current `/radiation` route, records the failure, and lets the existing low-frequency probe/page query or an explicit user login recover the session. It never sends the active list to `/login` automatically.
+- This fix is released as source version 0.8.19. The browser extension storage previously observed 0.8.17, so runtime verification must confirm that 0.8.19 is installed.

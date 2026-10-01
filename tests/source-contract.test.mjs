@@ -10,7 +10,7 @@ const updateTool = fs.readFileSync(path.join(root, 'tools', 'configure-github-ho
 execFileSync(process.execPath, ['--check', sourcePath], { stdio: 'inherit' });
 
 const required = [
-  ['metadata version', /@version\s+0\.8\.18/],
+  ['metadata version', /@version\s+0\.8\.19/],
   ['login route', /\/api\/admin\/userLogin\/login/],
   ['read-only status probe', /\/api\/ct\/rays\/rep\/statusNum/],
   ['read-only entry assertion', /assertAllowEnter/],
@@ -23,8 +23,8 @@ const required = [
   ['selector self-healing', /queryBodyRows/],
   ['interactive self-check', /runSelfCheck/],
   ['TOKEN_FAIL recovery', /__tokenRecoveryRetry/],
-  ['automatic re-auth navigation', /会话自愈调度/],
-  ['reauth requires configured account', /loginConfig\.enabled && String\(loginConfig\.username \|\| ''\)\.trim\(\)/],
+  ['in-page token recovery', /会话自愈保持当前页/],
+  ['recovery does not redirect', /redirected: false/],
   ['no password persistence', /directPassword = ''/],
   ['radiation route guard', /pathname !== '\/radiation'/],
   ['route cleanup', /stopRuntime\('route-exit'\)/],
@@ -46,6 +46,6 @@ if (!/readFileSync\(sourcePath, 'utf8'\)/.test(hotUpdateHelper) || !/writeFileSy
 }
 
 const state = JSON.parse(fs.readFileSync(path.join(root, 'PROJECT_STATE.json'), 'utf8'));
-if (state.version !== '0.8.18') throw new Error(`PROJECT_STATE version mismatch: ${state.version}`);
+if (state.version !== '0.8.19') throw new Error(`PROJECT_STATE version mismatch: ${state.version}`);
 
 console.log(`source-contract: passed ${required.length} checks; version=${state.version}`);

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         江西省县域医共体 - 自动诊断候选
 // @namespace    local.jiangxi.radiation
-// @version      0.8.18
+// @version      0.8.19
 // @updateURL   https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @downloadURL https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @description  以页面实时推送为主、轻量协议探测为兜底，按可配置规则识别后优先通过系统协议进入诊断；支持可控开发者诊断日志。
@@ -107,7 +107,6 @@
   let sessionIdentityRequest = null;
   let directPassword = '';
   let directLoginRunning = false;
-  let reauthScheduledAt = 0;
   // 业务前端会从 WebRTC ICE 候选中附带客户端地址；缺少该头时只读接口会返回 TOKEN_FAIL(2002)。
   let clientIp = '';
   let clientIpRequest = null;
@@ -356,14 +355,11 @@
       await ensureSessionIdentity();
       return run({ ...options, __tokenRecoveryRetry: true });
     }
-    const loginConfig = directLoginConfig();
-    // 只有明确配置了协议登录账号才允许会话自愈进入 /login。
-    // 仅勾选开关但账号为空时，门户登录页会把页面带到 /setting/profile，
-    // 这会打断当前列表并造成“刷新几秒后跳个人资料”的假象。
-    if (result.payload?.code === 2002 && loginConfig.enabled && String(loginConfig.username || '').trim() && page.location?.pathname === '/radiation' && Date.now() - reauthScheduledAt > 300000) {
-      reauthScheduledAt = Date.now();
-      developerLog('会话自愈调度', { source: 'token-recovery', reason: 'TOKEN_FAIL', hasLoginAccount: true }, { force: true });
-      setTimeout(() => { if (page.location?.pathname === '/radiation') page.location.replace('/login'); }, 800);
+    if (result.payload?.code === 2002 && page.location?.pathname === '/radiation') {
+      // 已经在影像列表页时，TOKEN_FAIL 只代表当前协议请求缺少/失效的业务头，
+      // 不能把已登录用户强行送到 /login；门户的登录页可能继续跳到 /setting/profile。
+      // 保留当前页面，让下一次低频探测、页面查询或用户主动登录完成恢复。
+      developerLog('会话自愈保持当前页', { source: 'token-recovery', reason: 'TOKEN_FAIL', redirected: false }, { force: true });
     }
     return result;
   }
