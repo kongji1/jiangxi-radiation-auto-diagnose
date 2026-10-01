@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         江西省县域医共体 - 自动诊断候选
 // @namespace    local.jiangxi.radiation
-// @version      0.8.17
+// @version      0.8.18
 // @description  以页面实时推送为主、轻量协议探测为兜底，按可配置规则识别后优先通过系统协议进入诊断；支持可控开发者诊断日志。
 // @match        http://10.10.94.90:22112/*
 // @match        http://10.10.94.90:22100/*
@@ -105,6 +105,7 @@
   let sessionIdentityRequest = null;
   let directPassword = '';
   let directLoginRunning = false;
+  let reauthScheduledAt = 0;
   // 业务前端会从 WebRTC ICE 候选中附带客户端地址；缺少该头时只读接口会返回 TOKEN_FAIL(2002)。
   let clientIp = '';
   let clientIpRequest = null;
@@ -313,7 +314,7 @@
     const request = (async () => {
       try {
         const { response, payload } = await fetchJson('/api/admin/user/info', {
-          method: 'GET', credentials: 'include', headers: { Accept: 'application/json' }
+          method: 'GET', credentials: 'include', headers: { Accept: 'application/json' }, __tokenRecoveryRetry: true
         }, 5000);
         const info = payload?.data;
         if (response.ok && payload?.code === 200 && info && typeof info === 'object') {
@@ -330,17 +331,32 @@
   async function fetchJson(url, options = {}, timeoutMs = 4500) {
     const page = pageWindow();
     const request = typeof page.fetch === 'function' ? page.fetch.bind(page) : fetch;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), Math.max(1000, Number(timeoutMs) || 4500));
-    try {
-      await ensureClientIp();
-      const response = await request(url, { ...options, headers: sessionHeaders(options.headers || {}), signal: controller.signal });
-      let payload = null;
-      try { payload = await response.json(); } catch (_) {}
-      return { response, payload };
-    } finally {
-      clearTimeout(timeout);
+    const run = async requestOptions => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), Math.max(1000, Number(timeoutMs) || 4500));
+      try {
+        await ensureClientIp();
+        const { __tokenRecoveryRetry: _internalRetry, ...networkOptions } = requestOptions;
+        const response = await request(url, { ...networkOptions, headers: sessionHeaders(networkOptions.headers || {}), signal: controller.signal });
+        let payload = null;
+        try { payload = await response.json(); } catch (_) {}
+        return { response, payload };
+      } finally { clearTimeout(timeout); }
+    };
+    const result = await run(options);
+    // TOKEN_FAIL 常见于页面从门户跳转后旧的用户头已失效；只在明确的 2002
+    // 返回时刷新一次会话身份并重试，避免把正常请求变成双倍流量。
+    if (result.payload?.code === 2002 && !options.__tokenRecoveryRetry) {
+      sessionIdentity = { info: null, uid: '', loading: false, lastAttemptAt: 0, loadedAt: 0 };
+      await ensureSessionIdentity();
+      return run({ ...options, __tokenRecoveryRetry: true });
     }
+    if (result.payload?.code === 2002 && directLoginConfig().enabled && page.location?.pathname === '/radiation' && Date.now() - reauthScheduledAt > 300000) {
+      reauthScheduledAt = Date.now();
+      developerLog('会话自愈调度', { source: 'token-recovery', reason: 'TOKEN_FAIL' }, { force: true });
+      setTimeout(() => { if (page.location?.pathname === '/radiation') page.location.replace('/login'); }, 800);
+    }
+    return result;
   }
 
   function directLoginConfig() {

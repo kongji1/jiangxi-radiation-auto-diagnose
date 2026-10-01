@@ -135,3 +135,10 @@
 - `node --check` passed for 0.8.17.
 
 
+
+## 2026-10-01 continuation: recovery and self-healing (0.8.18)
+
+- `fetchJson` now retries a single explicit `TOKEN_FAIL` (business code 2002) after refreshing the in-memory session identity; it does not retry normal responses or create a high-frequency loop.
+- If the recovered request still returns 2002 and direct login is enabled, the list route schedules one delayed navigation to `/login`, allowing the existing direct-login flow to re-establish the session. The schedule is rate-limited to five minutes.
+- The settings panel now exposes a read-only self-check for route, page rows, account gate, session info, and `statusNum`. Body-row discovery tries the configured selector and common Element Plus fallbacks.
+- Source version is 0.8.18. Browser runtime loading and a real logged-in recovery cycle remain unverified.

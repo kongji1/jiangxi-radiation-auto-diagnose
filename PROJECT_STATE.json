@@ -1,14 +1,14 @@
 {
   "project": "江西省县域医共体 - 自动诊断候选",
   "source": "jiangxi-radiation-auto-diagnose.user.js",
-  "version": "0.8.17",
+  "version": "0.8.18",
   "snapshotDate": "2026-10-01",
   "sourceOfTruth": "jiangxi-radiation-auto-diagnose.user.js",
   "handoff": "docs/AI_HANDOFF.md",
   "protocol": "docs/PROTOCOL.md",
   "verification": "docs/VERIFICATION.md",
   "tampermonkeyLoadedVersion": "unknown; previously observed 0.5.0 before this project move",
-  "liveVerification": "Source audit and node syntax validation completed for 0.8.17; Tampermonkey runtime loading and logged-in browser behavior remain to be verified.",
+  "liveVerification": "Source contract and syntax tests pass for 0.8.18; TOKEN_FAIL recovery, selector self-healing, and GitHub workflow are source-verified; browser runtime and remote repository publication remain to be verified.",
   "performance": {
     "localScanMs": 2000,
     "statusProbeMs": 5000,
@@ -54,11 +54,12 @@
     ]
   },
   "nextActions": [
-    "在 Tampermonkey 中加载 0.8.17 并确认脚本版本",
+    "在 Tampermonkey 中加载 0.8.18 并确认脚本版本",
     "登录会话验证协议列表和 WebSocket 实时字段",
     "用有结论/无结论、不同检查项目和申请机构记录验证排序",
     "用年龄不限和年龄范围分别做边界反向测试",
-    "观察协议失败退避、列表冷却和页面自愈行为"
+    "触发一次 TOKEN_FAIL，观察单次恢复和直接登录自愈",
+    "确定 GitHub 仓库后推送并配置 @updateURL/@downloadURL"
   ],
   "projectRules": "AGENTS.md"
 }

@@ -52,3 +52,12 @@
 截至本快照，之前从浏览器扩展存储看到的已安装脚本记录仍为 `0.5.0`；当前 Edge 主进程命令行虽然带有 `--remote-debugging-port=9222`，但 `http://127.0.0.1:9222/json/version` 和 `/json/list` 仍连接被拒绝，没有可用监听。因此不能把本目录的 `0.8.5` 源码等同于浏览器已经生效。下一次接管必须重新核实，不得沿用这个状态作未经验证的结论。
 - 0.8.6 静态核验：当 `statusNum` 连续失败且无近期 WebSocket 提示时，`scheduleAutoQueryFallback` 最早 15 秒后复用页面查询按钮；该路径有并发锁、失败次数门槛和路由/启用状态门禁。
 - 0.8.6 静态核验：Tampermonkey 元数据同时匹配 `/radiation*` 与 `/radiation/*`，bootstrap 在目标路由以外等待并只初始化一次，覆盖门户跳转后的初始化时序。
+
+## 0.8.18 本地回归验证（2026-10-01）
+
+- `node --check jiangxi-radiation-auto-diagnose.user.js`：通过。
+- `node tests/source-contract.test.mjs`：通过，覆盖 15 项源码契约，新增 TOKEN_FAIL 单次恢复和自动重新登录调度检查。
+- `git diff --check`：通过。
+- TOKEN_FAIL 恢复策略限制为一次重试；仍失败时直接登录自愈调度有五分钟冷却，避免循环跳转和额外负载。
+
+仍需浏览器验证：真实登录会话下触发 2002 后是否能恢复、直接登录跳转是否成功，以及 Tampermonkey 是否已加载 0.8.18。
