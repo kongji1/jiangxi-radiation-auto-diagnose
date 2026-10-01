@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         江西省县域医共体 - 自动诊断候选
 // @namespace    local.jiangxi.radiation
-// @version      0.8.29
+// @version      0.8.30
 // @updateURL   https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @downloadURL https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @description  以页面实时推送为主、轻量协议探测为兜底，按可配置规则识别后优先通过系统协议进入诊断；支持可控开发者诊断日志。
@@ -251,7 +251,7 @@
     console.info(`[自动诊断][开发者] ${JSON.stringify(item)}`);
   }
   function developerLogText() {
-    return JSON.stringify({ version: '0.8.29', exportedAt: new Date().toISOString(), events: debugEvents }, null, 2);
+    return JSON.stringify({ version: '0.8.30', exportedAt: new Date().toISOString(), events: debugEvents }, null, 2);
   }
   function developerModeStateText() {
     if (!config.developerMode) return '当前关闭';
@@ -825,8 +825,25 @@
     return configured && !operatorDisabled(configured) ? configured : null;
   }
 
+  // diagnosisActive 是本脚本刚发起进入后的短期互斥锁。列表仍会继续刷新；
+  // 如果列表中已没有带诊断医生姓名的“诊断中”记录，视为当前入口已释放，
+  // 允许下一位客户再次走协议校验。列表暂时不可读时保持锁，交给服务端门禁兜底。
+  function entryDiagnosisLockActive() {
+    if (!diagnosisActive) return false;
+    const rows = queryBodyRows();
+    if (!rows.length) return true;
+    const owned = rows.some(row => {
+      const d = rowData(row);
+      return /诊断中/.test(norm(d.status)) && !!norm(d.doctor);
+    });
+    if (owned) return true;
+    diagnosisActive = false;
+    developerLog('诊断锁释放', { reason: '列表中没有带诊断医生姓名的诊断中记录' });
+    return false;
+  }
+
   function clickDiagnose(d) {
-    if (diagnosisActive) return false;
+    if (entryDiagnosisLockActive()) return false;
     if (!d?.row) return false;
     const current = rowData(d.row);
     if (!isPendingReport(current)) {
@@ -1054,7 +1071,7 @@
   }
 
   async function enterDiagnosis(d) {
-    if (entryRunning || diagnosisActive || pageWindow().location.pathname !== '/radiation') return false;
+    if (entryRunning || entryDiagnosisLockActive() || pageWindow().location.pathname !== '/radiation') return false;
     if (d?.__entryBlocked) {
       developerLog('进入前硬门禁拒绝', { ...debugCandidate(d), reason: d.__entryBlocked });
       return false;
@@ -1129,6 +1146,10 @@
         continue;
       }
       developerLog('候选命中', { ...debugCandidate(d, { source: 'remote-list' }), reason: '规则通过' });
+      if (entryDiagnosisLockActive()) {
+        developerLog('候选观察', { ...debugCandidate(d, { source: 'remote-list' }), reason: '已有客户处于诊断中，仅继续刷新列表' });
+        continue;
+      }
       if (!await enterDiagnosis(d)) {
         developerLog('候选进入失败', { ...debugCandidate(d, { source: 'remote-list' }), reason: '协议和页面入口均未成功' });
         continue;
@@ -1141,7 +1162,9 @@
     return false;
   }
   async function refreshRemoteCandidates(options = {}) {
-    if (diagnosisActive || pageWindow().location.pathname !== '/radiation') return false;
+    // 诊断锁只禁止再次进入客户，不暂停列表读取。诊断页右侧仍可能显示待诊断列表，
+    // 因此协议列表和实时线索继续运行，由 enterDiagnosis() 统一挡住第二次进入。
+    if (pageWindow().location.pathname !== '/radiation') return false;
     const now = Date.now();
     const force = options.force === true;
     const match = options.match && typeof options.match === 'object' ? options.match : null;
@@ -1173,7 +1196,7 @@
   async function probeStatus() {
     // 协议探测不依赖表格 DOM，隐藏标签页也继续工作；浏览器冻结页面时则由 WebSocket
     // 消息在恢复后补上。DOM 扫描仍由 scan() 自己限制为前台执行。
-    if (diagnosisActive || !config.enabled || config.entryMode === 'click' || probeRunning || pageWindow().location.pathname !== '/radiation') return;
+    if (!config.enabled || config.entryMode === 'click' || probeRunning || pageWindow().location.pathname !== '/radiation') return;
     if (!accountAllowed()) return;
     probeRunning = true;
     const startedAt = Date.now();
@@ -1225,7 +1248,7 @@
   }
 
   function queueRealtimeRefresh(options = {}) {
-    if (diagnosisActive || !config.enabled || config.entryMode === 'click' || !config.realtimeHints || pageWindow().location.pathname !== '/radiation') return;
+    if (!config.enabled || config.entryMode === 'click' || !config.realtimeHints || pageWindow().location.pathname !== '/radiation') return;
     if (!accountAllowed()) return;
     if (options.match && typeof options.match === 'object') queuedRealtimeMatch = options.match;
     if (options.hintAt) queuedRealtimeHintAt = Number(options.hintAt) || queuedRealtimeHintAt;
@@ -1253,7 +1276,7 @@
   }
 
   async function processRealtimeHint(hint) {
-    if (diagnosisActive || !config.enabled || config.entryMode === 'click' || !config.realtimeHints || pageWindow().location.pathname !== '/radiation') return;
+    if (!config.enabled || config.entryMode === 'click' || !config.realtimeHints || pageWindow().location.pathname !== '/radiation') return;
     if (!accountAllowed()) return;
     if (!hint || typeof hint !== 'object') {
       queueRealtimeRefresh({ hintAt: Date.now() });
@@ -1290,7 +1313,11 @@
         else if (d && !recordId) developerLog('实时推送降级', { ...debugCandidate(d, { source: 'websocket' }), reason: '线索没有记录编号' });
         if (d && !seenAlready && !failedRules.length && recordId) {
           developerLog('实时推送直接协议校验', { ...debugCandidate(d, { source: 'websocket' }), serverStatusCheck: statusUnknown });
-          entered = await enterDiagnosis(d);
+          if (entryDiagnosisLockActive()) {
+            developerLog('实时推送观察', { ...debugCandidate(d, { source: 'websocket' }), reason: '已有客户处于诊断中，仅保留列表刷新' });
+          } else {
+            entered = await enterDiagnosis(d);
+          }
           if (entered) rememberData(d);
           else developerLog('候选进入失败', { ...debugCandidate(d, { source: 'websocket' }), reason: '协议入口失败，等待窄列表兜底' });
         }
@@ -1400,7 +1427,7 @@
   }
 
   async function scan() {
-    if (diagnosisActive || !config.enabled || running || document.visibilityState === 'hidden') return;
+    if (!config.enabled || running || document.visibilityState === 'hidden') return;
     if (!accountAllowed()) return;
     running = true;
     try {
@@ -1425,6 +1452,10 @@
           continue;
         }
         developerLog('候选命中', { ...debugCandidate(d, { source: 'dom' }), reason: '规则通过' });
+        if (entryDiagnosisLockActive()) {
+          developerLog('候选观察', { ...debugCandidate(d, { source: 'dom' }), reason: '已有客户处于诊断中，仅继续观察列表' });
+          continue;
+        }
         // 只有真正找到可点击的诊断入口后才记入 seen；按钮暂时禁用时下一轮继续尝试。
         if (!await enterDiagnosis(d)) {
           developerLog('候选进入失败', { ...debugCandidate(d, { source: 'dom' }), reason: '协议和页面入口均未成功' });
@@ -1772,3 +1803,4 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bootstrap, { once: true });
   else bootstrap();
 })();
+

@@ -7,13 +7,13 @@
 - 快照日期：2026-10-01
 - 工作目录：`G:\bu\0430\02_项目源码\江西省县域医共体-自动诊断候选`
 - 源码文件：`jiangxi-radiation-auto-diagnose.user.js`
-- 源码版本：`0.8.29`
+- 源码版本：`0.8.30`
 - 当前目标：通过已有 WebSocket 和只读协议稳定发现候选，服务端授权通过后进入诊断；保持单客户诊断串行、服务器低负载和可回退。
 
 ### GPT-6 接管须知
 
 - 以主文件元数据、Git 提交和浏览器运行日志为三类独立证据；源码版本不等于 Tampermonkey 已加载版本。
-- 当前最新提交为 `47c0461`。0.8.29 将 WebSocket 列表调度窗口压到 250ms，并记录 `dispatchDelayMs`/`withinOneSecond`；`diagnosisActive` 防止诊断中再次进入其它客户。
+- 当前最新提交为 `47c0461`。0.8.30 将 WebSocket 列表调度窗口压到 250ms，并记录 `dispatchDelayMs`/`withinOneSecond`；`diagnosisActive` 防止诊断中再次进入其它客户。
 - WebSocket 有报告编号但状态字段为空时，允许调用 `assertAllowEnter`，由服务端决定是否仍是可进入的待诊断记录；没有报告编号才走列表兜底。
 - 服务端 `statusNum` 或窄列表返回业务码 2002 时，不能循环高频重试；状态探测使用无筛选全局计数，列表回退使用最近列表并在客户端过滤。
 - “当前报告已被其他用户锁定”、诊断中、待审核、审核中、已审核和已打印记录必须跳过；不要为了提高命中率放宽这一门禁。
@@ -166,7 +166,8 @@
 - Recovery now keeps the current `/radiation` route, records the failure, and lets the existing low-frequency probe/page query or an explicit user login recover the session. It never sends the active list to `/login` automatically.
 - This fix is released as source version 0.8.19. The browser extension storage previously observed 0.8.17, so runtime verification must confirm that 0.8.19 is installed.
 - Direct login is also allowed when the page opens directly at `/radiation`: with the feature enabled, a non-empty configured account, and no `Auth` cookie, the existing password/CAPTCHA dialog runs before the list scanner starts. Users do not need to visit `/login` first. This behavior is released as 0.8.20.
-- 0.8.29 adds the local OCR bridge from `tools/captcha_ocr_server.py`. The protocol-login CAPTCHA is an arithmetic challenge such as `99-40=`; the bridge recognizes the expression and calculates the answer. The portal's four-digit CAPTCHA remains supported. OCR failure falls back to the existing manual input dialog.
+- 0.8.30 adds the local OCR bridge from `tools/captcha_ocr_server.py`. The protocol-login CAPTCHA is an arithmetic challenge such as `99-40=`; the bridge recognizes the expression and calculates the answer. The portal's four-digit CAPTCHA remains supported. OCR failure falls back to the existing manual input dialog.
 - The bridge is installed in the ignored `.captcha-ocr-venv` environment from `tools/requirements-captcha-ocr.txt` and runs on `127.0.0.1:18766`; `8766` is reserved by the existing OAuth proxy. Start it with `tools/start-captcha-ocr.ps1` and verify `GET /health` before testing login. The service is loopback-only and does not log images or answers.
-- 0.8.29 also rate-limits TOKEN_FAIL recovery to one session-identity refresh per 15 seconds and throttles the corresponding developer event to the same interval. The `/radiation` route protection and single retry remain unchanged; this reduces duplicate recovery traffic when `statusNum` repeatedly returns 2002.
+- 0.8.30 also rate-limits TOKEN_FAIL recovery to one session-identity refresh per 15 seconds and throttles the corresponding developer event to the same interval. The `/radiation` route protection and single retry remain unchanged; this reduces duplicate recovery traffic when `statusNum` repeatedly returns 2002.
 - Direct-login bootstrap now probes `/api/admin/user/info` before prompting for a password. This handles HttpOnly or delayed `Auth` cookies: an already logged-in page returns through the existing session and never shows the protocol-password dialog on refresh.
+
