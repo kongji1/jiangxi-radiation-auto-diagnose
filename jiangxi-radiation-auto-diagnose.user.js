@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         江西省县域医共体 - 自动诊断候选
 // @namespace    local.jiangxi.radiation
-// @version      0.8.26
+// @version      0.8.27
 // @updateURL   https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @downloadURL https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @description  以页面实时推送为主、轻量协议探测为兜底，按可配置规则识别后优先通过系统协议进入诊断；支持可控开发者诊断日志。
@@ -248,7 +248,7 @@
     console.info(`[自动诊断][开发者] ${JSON.stringify(item)}`);
   }
   function developerLogText() {
-    return JSON.stringify({ version: '0.8.26', exportedAt: new Date().toISOString(), events: debugEvents }, null, 2);
+    return JSON.stringify({ version: '0.8.27', exportedAt: new Date().toISOString(), events: debugEvents }, null, 2);
   }
   function developerModeStateText() {
     if (!config.developerMode) return '当前关闭';
@@ -1000,7 +1000,7 @@
       locked: !!(recordView?.locked || d?.locked),
       record
     };
-    if (!isPendingReport(entryData)) {
+    if (!isPendingReport(entryData) && !d?.__realtimeNeedsServerStatus) {
       d.__entryBlocked = entryData.locked ? '报告已锁定/占用' : '报告状态非待诊断';
       developerLog('协议进入跳过', { ...debugCandidate(entryData), reason: d.__entryBlocked });
       return false;
@@ -1054,7 +1054,7 @@
       developerLog('进入前硬门禁拒绝', { ...debugCandidate(d), reason: d.__entryBlocked });
       return false;
     }
-    if (!isPendingReport(d)) {
+    if (!isPendingReport(d) && !d?.__realtimeNeedsServerStatus) {
       developerLog('进入前硬门禁拒绝', { ...debugCandidate(d), reason: d?.locked ? '报告已锁定/占用' : '报告状态非待诊断' });
       return false;
     }
@@ -1260,11 +1260,19 @@
       realtimeRecordRunning = true;
       try {
         const seenAlready = !!d && dataSeen(d);
-        const failedRules = d ? matchFailureReasons(d) : [];
+        const statusUnknown = !!recordId && d && !norm(
+          d.status || d.statusCode || d.record?.reportStatus || d.record?.reportStatusName ||
+          d.record?.reportStatusCode || d.record?.checkStatusName || d.record?.checkStatusCode
+        );
+        const failedRules = d ? matchFailureReasons(d).filter(reason =>
+          !statusUnknown || !['报告状态非待诊断', '报告状态'].includes(reason)
+        ) : [];
+        if (statusUnknown) d.__realtimeNeedsServerStatus = true;
         if (seenAlready) developerLog('候选跳过', { ...debugCandidate(d, { source: 'websocket' }), reason: '已处理' });
         else if (d && failedRules.length) developerLog('候选过滤', { ...debugCandidate(d, { source: 'websocket' }), reason: '规则不匹配', failedRules });
         else if (d && !recordId) developerLog('实时推送降级', { ...debugCandidate(d, { source: 'websocket' }), reason: '线索没有记录编号' });
         if (d && !seenAlready && !failedRules.length && recordId) {
+          developerLog('实时推送直接协议校验', { ...debugCandidate(d, { source: 'websocket' }), serverStatusCheck: statusUnknown });
           entered = await enterDiagnosis(d);
           if (entered) rememberData(d);
           else developerLog('候选进入失败', { ...debugCandidate(d, { source: 'websocket' }), reason: '协议入口失败，等待窄列表兜底' });
