@@ -13,7 +13,7 @@
 ### GPT-6 接管须知
 
 - 以主文件元数据、Git 提交和浏览器运行日志为三类独立证据；源码版本不等于 Tampermonkey 已加载版本。
-- 当前最新提交为 `47c0461`。0.8.30 将 WebSocket 列表调度窗口压到 250ms，并记录 `dispatchDelayMs`/`withinOneSecond`；`diagnosisActive` 防止诊断中再次进入其它客户。
+- 当前最新提交为 `d3b5557`。0.8.30 将 WebSocket 列表调度窗口压到 250ms，并记录 `dispatchDelayMs`/`withinOneSecond`；`diagnosisActive` 只防止诊断中再次进入其它客户，不暂停列表刷新、状态探测或 WebSocket 观察。若列表中没有带诊断医生姓名的“诊断中”记录，入口锁会自动释放。
 - WebSocket 有报告编号但状态字段为空时，允许调用 `assertAllowEnter`，由服务端决定是否仍是可进入的待诊断记录；没有报告编号才走列表兜底。
 - 服务端 `statusNum` 或窄列表返回业务码 2002 时，不能循环高频重试；状态探测使用无筛选全局计数，列表回退使用最近列表并在客户端过滤。
 - “当前报告已被其他用户锁定”、诊断中、待审核、审核中、已审核和已打印记录必须跳过；不要为了提高命中率放宽这一门禁。
