@@ -8,6 +8,7 @@
 - 主文件：[jiangxi-radiation-auto-diagnose.user.js](./jiangxi-radiation-auto-diagnose.user.js)
 - 协议参考包：[reference/app-bundles](./reference/app-bundles)
 - 交接入口：[docs/AI_HANDOFF.md](./docs/AI_HANDOFF.md)
+- GPT-6 维护入口：[docs/GPT6_MAINTENANCE.md](./docs/GPT6_MAINTENANCE.md)
 - 协议说明：[docs/PROTOCOL.md](./docs/PROTOCOL.md)
 - 验证记录：[docs/VERIFICATION.md](./docs/VERIFICATION.md)
 - 变更记录：[docs/CHANGELOG.md](./docs/CHANGELOG.md)
@@ -31,7 +32,7 @@
 - 状态探测是兜底唤醒器：前台默认约 5 秒，最近收到 WebSocket 业务消息后自动降为至少 15 秒；隐藏标签页至少 15 秒，并带轻微随机抖动和失败退避，避免固定频率冲击服务器。
 - 状态计数变化或 15 秒补偿窗口到达时才读取常规列表，默认最多读取 30 条、按申请时间倒序；申请时间范围会同步下传到列表请求，减少无关数据。
 - 默认“最近 5–30 分钟”会先观察新申请，满 5 分钟后才允许进入，时间窗口每次请求都会随当前时间移动。
-- 列表请求、协议校验和探测请求都有超时，并且禁止同类请求重叠。
+- 列表请求、协议校验和探测请求都有超时，并且禁止同类请求重叠；WebSocket 触发的列表调度窗口为 250ms，强制刷新冷却为 500ms。
 - 进入诊断前再次确认报告状态仍为待诊断（当前状态码 `102501`），并检查列表记录或行操作是否已被锁定。诊断中、待审核、审核中、已审核、已打印以及“已被其他用户锁定”的记录不会调用进入协议或点击诊断按钮；通过门禁后才使用业务路由打开页面，由诊断页继续完成系统锁定流程。
 - 后台标签页不依赖表格 DOM：WebSocket、statusNum、列表查询和协议进入都可继续工作；浏览器被系统冻结、标签页被丢弃或浏览器关闭时，任何页面脚本都无法保证继续执行。
 - 开发者模式只在内存保存最近 240 条流程事件，并在控制台输出过滤原因、状态门禁（非待诊断/已锁定）、协议耗时和不可逆候选标签；不记录患者姓名、申请单号、报告编号或认证信息。

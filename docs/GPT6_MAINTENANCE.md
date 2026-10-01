@@ -1,44 +1,57 @@
-# GPT-6 维护接管说明
+# GPT-6 维护入口
 
-## 先读什么
+本文是下一次 GPT-6 接管本项目时的最短可靠入口。它记录当前架构、不可破坏的业务门禁、运行时证据和发布顺序。
 
-1. `AGENTS.md`：项目边界和安全约束。
-2. `PROJECT_STATE.json`：当前版本、运行态证据和下一步。
-3. `docs/AI_HANDOFF.md`：历次变更和未完成验证。
-4. `docs/PROTOCOL.md`：接口、字段和负载限制。
-5. `docs/VERIFICATION.md`：已经验证与仍需浏览器验证的项目。
+## 项目边界
 
-唯一业务源码是 `jiangxi-radiation-auto-diagnose.user.js`。`reference/app-bundles` 只用于核对页面协议，不直接改动。
+主源码只有 `jiangxi-radiation-auto-diagnose.user.js`。`reference/app-bundles` 用于读取业务前端协议，不直接修改；`tools/captcha_ocr_server.py` 是独立的本机回环 OCR 辅助服务；`ctm-mcp-full` 是 CUA/CTM 的独立工程，不属于业务脚本运行时。
 
-## 维护顺序
+## 运行链路
 
-每次接管按以下顺序执行：
+```text
+业务页已有 WebSocket
+       |
+       +-- 有报告编号 --> 本地规则 --> assertAllowEnter --> /radiation/report
+       |
+       +-- 无编号/协议失败 --> 只读列表 --> 客户端状态、锁定和过滤门禁
+       |
+       +-- statusNum 全局计数 --> 只在计数变化或补偿窗口触发列表
+```
 
-1. `git status`、读取当前版本和最近提交。
-2. 检查是否有用户正在使用的浏览器运行态；不要用本地源码存在推断 Tampermonkey 已加载。
-3. 先做只读协议和字段核对，再修改脚本。
-4. 修改后运行 `node --check jiangxi-radiation-auto-diagnose.user.js` 和 `node tests/source-contract.test.mjs`。
-5. 对状态、锁定、申请时间和账号门禁做正向与反向测试。
-6. 更新 `PROJECT_STATE.json`、`AI_HANDOFF.md`、`VERIFICATION.md`，区分源码证据和浏览器证据。
+WebSocket 线索的正常调度窗口为 250ms，强制刷新冷却为 500ms。事件会记录 `dispatchDelayMs` 和 `withinOneSecond`，以后必须用浏览器日志或 CDP Network 时间戳验证，而不能只看源码。
 
-发布前可直接运行 `powershell -ExecutionPolicy Bypass -File tools/verify-release.ps1`。它会检查脚本语法、22 项源码契约、4 项 OCR 测试、OCR 健康接口和 Git 工作区；浏览器实际加载版本、真实协议登录和候选进入仍必须单独记录。
+## 不可破坏的门禁
 
-## 行为不变量
+1. 只有服务端 `assertAllowEnter` 明确允许时才打开诊断路由。
+2. 已锁定、被其他用户占用、诊断中、待审核、审核中、已审核、已打印的记录不得进入。
+3. 当前客户进入诊断后设置 `diagnosisActive`，列表扫描、WebSocket 候选、状态探测和列表刷新全部暂停；返回 `/radiation` 后才恢复。
+4. WebSocket 没有状态字段时可以调用服务端授权校验，但不能把空状态直接当成待诊断。
+5. `code=2002` 不是允许无限重试的信号。状态探测必须使用无状态筛选的全局计数；列表失败时最多退回最近列表并在客户端过滤。
 
-- 只有待诊断状态 `102501` 且未被其它用户锁定的记录可以调用 `assertAllowEnter`。
-- 协议失败必须退避、排队或回退到只读/页面同步路径，不能用高频完整列表请求冲击服务器。
-- WebSocket 只观察页面已有连接，不重复创建业务连接。
-- 患者姓名、申请单号、报告编号、Cookie、Authorization、密码和身份证号不得写入日志、文档、导出配置或提交记录。
-- 报告“初写优先”只接受结论字段，描述和备注不能充当结论。
+## 修改与验证顺序
 
-## 配置语义
+```powershell
+node --check .\jiangxi-radiation-auto-diagnose.user.js
+node .\tests\source-contract.test.mjs
+python .\tests\captcha_ocr.test.py
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\verify-release.ps1 -SkipOcrHealth -RequireClean
+```
 
-- `age.unlimited=true` 时忽略年龄上下限。
-- `examWeights`、`institutionWeights` 使用 `名称=权重`，权重越大越先处理。
-- `preliminaryReportFirst=true` 时有非空结论的记录优先。
-- `allowedAccounts=[]` 表示不限制账号。
-- `directLogin` 只保存账号，不保存密码；密码仅当前页面会话使用。
+再用 CUA 验证运行态：
 
-## GitHub 热更新
+- 读取当前 Edge 业务页，不同时操作门户和影像页；
+- 监听 `statusNum`、`rep/list`、`assertAllowEnter`；
+- 检查 `实时列表请求发起` 的 `dispatchDelayMs`；
+- 确认诊断页打开后没有第二个客户的进入请求；
+- 读取 Tampermonkey 实际日志或元数据，确认加载版本。
 
-GitHub Actions 的 `validate.yml` 会执行语法和源码契约测试。仓库地址确定后，在用户脚本元数据中加入 GitHub Raw 的 `@updateURL` 和 `@downloadURL`，再推送递增版本。GitHub 推送成功不等同于浏览器已经更新，必须在 Tampermonkey 和业务页面运行态确认版本。
+## 发布证据
+
+Git 提交只能证明本地源码已变更。热更新完成还必须同时证明：
+
+1. 目标 GitHub 仓库存在且公开 Raw 可读；
+2. Raw 文件头部版本与本地提交一致；
+3. Tampermonkey 更新检查或实际运行日志已加载该版本；
+4. CUA CDP 看到新版本行为，而不是只看到旧版日志。
+
+任何一项缺失，都只能报告为“源码已完成，运行态或发布态未确认”。

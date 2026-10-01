@@ -6,6 +6,7 @@ const root = path.resolve(import.meta.dirname, '..');
 const sourcePath = path.join(root, 'jiangxi-radiation-auto-diagnose.user.js');
 const source = fs.readFileSync(sourcePath, 'utf8');
 const readme = fs.readFileSync(path.join(root, 'README.md'), 'utf8');
+const gpt6Guide = fs.readFileSync(path.join(root, 'docs', 'GPT6_MAINTENANCE.md'), 'utf8');
 const updateTool = fs.readFileSync(path.join(root, 'tools', 'configure-github-hot-update.ps1'), 'utf8');
 const releaseTool = fs.readFileSync(path.join(root, 'tools', 'verify-release.ps1'), 'utf8');
 const publishTool = fs.readFileSync(path.join(root, 'tools', 'publish-github.ps1'), 'utf8');
@@ -71,6 +72,8 @@ const state = JSON.parse(fs.readFileSync(path.join(root, 'PROJECT_STATE.json'), 
 if (state.version !== '0.8.29') throw new Error(`PROJECT_STATE version mismatch: ${state.version}`);
 if (!readme.includes('源码版本：`0.8.29`')) throw new Error('README version mismatch');
 if (!readme.includes('127.0.0.1:18766')) throw new Error('README OCR endpoint missing');
+if (!readme.includes('GPT6_MAINTENANCE.md')) throw new Error('README GPT-6 guide missing');
+if (!gpt6Guide.includes('dispatchDelayMs') || !gpt6Guide.includes('diagnosisActive')) throw new Error('GPT-6 maintenance guide incomplete');
 if (!/source-contract\.test\.mjs/.test(releaseTool) || !/captcha_ocr\.test\.py/.test(releaseTool)) throw new Error('release verification tool incomplete');
 if (!/git ls-remote/.test(publishTool) || !/git push origin/.test(publishTool) || !/raw\.githubusercontent\.com/.test(publishTool)) throw new Error('GitHub publish tool incomplete');
 
