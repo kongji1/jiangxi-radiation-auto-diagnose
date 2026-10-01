@@ -7,8 +7,8 @@
   "handoff": "docs/AI_HANDOFF.md",
   "protocol": "docs/PROTOCOL.md",
   "verification": "docs/VERIFICATION.md",
-  "tampermonkeyLoadedVersion": "0.8.19 observed in local Edge storage; 0.8.21 source is not yet confirmed loaded",
-  "liveVerification": "Source contract, syntax, and arithmetic CAPTCHA bridge tests pass for 0.8.21. Browser storage diagnostics show the installed runtime is still older than 0.8.21: it repeatedly receives statusNum code=2002 but records 会话自愈保持当前页 with redirected:false and does not navigate to /setting/profile. The local OCR bridge supports arithmetic protocol CAPTCHAs and four-digit portal CAPTCHAs; real OCR login and Tampermonkey 0.8.21 loading still need browser verification.",
+  "tampermonkeyLoadedVersion": "0.8.21 feature markers observed in local Edge storage (directLogin OCR fields); exact metadata version is not exposed by the storage record",
+  "liveVerification": "Source contract, syntax, and arithmetic CAPTCHA bridge tests pass for 0.8.21. Browser storage now contains directLogin.ocrEnabled=true and the loopback OCR endpoint, and the refreshed logged-in page remains /radiation without a password dialog. Repeated statusNum code=2002 still records 会话自愈保持当前页 with redirected:false. Real OCR recognition and protocol login remain unverified.",
   "performance": {
     "localScanMs": 2000,
     "statusProbeMs": 5000,
