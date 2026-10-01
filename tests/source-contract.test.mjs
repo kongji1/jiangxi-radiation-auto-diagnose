@@ -52,6 +52,8 @@ const required = [
   ['developer rolling retention', /DEBUG_RETENTION_MS = 10 \* 60 \* 1000/],
   ['full candidate debug fields', /applicationNo: d\?\.applicationNo[\s\S]+patient: d\?\.patient/],
   ['full record debug snapshot', /record: d\?\.record \|\| null/],
+  ['credential presence diagnostics', /debugCredentialShape[\s\S]+authCookie[\s\S]+authorizationHeader/],
+  ['credential values not logged', /原始值只在当前请求内使用/],
   ['developer event pruning', /pruneDeveloperEvents/],
   ['developer mode upgrade migration', /developerModeDebugWindowVersion !== SCRIPT_VERSION/],
   ['direct login from radiation', /directLoginRoute = currentUrl\.pathname === '\/login' \|\| currentUrl\.pathname === '\/radiation'/],
@@ -105,6 +107,8 @@ if (state.performance?.realtimeListMinCooldownMs !== 500) throw new Error('PROJE
 if (state.performance?.developerModeDefault !== true) throw new Error('PROJECT_STATE developer mode default mismatch');
 if (state.performance?.developerDebugRetentionMs !== 600000) throw new Error('PROJECT_STATE developer retention mismatch');
 if (state.performance?.developerDebugFullCandidateFields !== true) throw new Error('PROJECT_STATE full debug fields mismatch');
+if (state.performance?.credentialShapeDiagnostics !== true) throw new Error('PROJECT_STATE credential diagnostics mismatch');
+if (state.performance?.credentialValuesPersisted !== false) throw new Error('PROJECT_STATE credential persistence boundary mismatch');
 if (!readme.includes('源码版本：`0.8.36`')) throw new Error('README version mismatch');
 if (!readme.includes('127.0.0.1:18766')) throw new Error('README OCR endpoint missing');
 if (!readme.includes('GPT6_MAINTENANCE.md')) throw new Error('README GPT-6 guide missing');

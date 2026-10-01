@@ -307,8 +307,30 @@
   function pageWindow() {
     return typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
   }
-  // 按业务前端的会话拦截器补齐认证和登录用户请求头；只在当前页面内存/请求中使用，
-  // 不写入 GM_*、不输出日志，也不把认证值放入任何持久化结构。
+  function debugCredentialShape(value) {
+    const text = String(value || '');
+    return { present: !!text, length: text.length, hash: text ? debugHash(text) : '' };
+  }
+  function debugAuthContext(headers = {}) {
+    const cookieNames = String(document.cookie || '').split(';').map(x => x.trim().split('=')[0]).filter(Boolean);
+    return {
+      cookieNames,
+      authCookie: debugCredentialShape(readCookie('Auth')),
+      loginCodeCookie: debugCredentialShape(readCookie('LoginCode')),
+      workstationCookie: debugCredentialShape(readCookie('WorkStation')),
+      authorizationHeader: debugCredentialShape(headers.Authorization),
+      loginUserKeyHeader: debugCredentialShape(headers['LOGIN-USER-KEY']),
+      loginUserUidHeader: debugCredentialShape(headers['LOGIN-USER-UID']),
+      userInfoHeader: debugCredentialShape(headers['USER-INFO']),
+      workCodeHeader: debugCredentialShape(headers.WORKCODE),
+      clientIpHeader: debugCredentialShape(headers['LOGIN-CLIENT-IP']),
+      signHeader: debugCredentialShape(headers.sign),
+      sessionIdentityLoaded: !!sessionIdentity.info,
+      clientIpPresent: !!clientIp
+    };
+  }
+  // 按业务前端的会话拦截器补齐认证和登录用户请求头；原始值只在当前请求内使用，
+  // 调试记录仅保存存在性、长度和不可逆短哈希，便于判断 TOKEN_FAIL 的会话阶段。
   function sessionHeaders(input = {}) {
     const headers = { ...input };
     const auth = readCookie('Auth');
@@ -331,6 +353,7 @@
     } catch (_) {}
     const workCode = readCookie('WorkStation');
     if (workCode && !headers.WORKCODE) headers.WORKCODE = workCode;
+    developerLog('认证上下文', debugAuthContext(headers));
     return headers;
   }
   async function ensureClientIp() {
@@ -392,9 +415,11 @@
       try {
         await ensureClientIp();
         const { __tokenRecoveryRetry: _internalRetry, ...networkOptions } = requestOptions;
-        const response = await request(url, { ...networkOptions, headers: sessionHeaders(networkOptions.headers || {}), signal: controller.signal });
+        const requestHeaders = sessionHeaders(networkOptions.headers || {});
+        const response = await request(url, { ...networkOptions, headers: requestHeaders, signal: controller.signal });
         let payload = null;
         try { payload = await response.json(); } catch (_) {}
+        developerLog('协议响应认证上下文', { path: String(url).split('?')[0], code: payload?.code ?? null, auth: debugAuthContext(requestHeaders) });
         return { response, payload };
       } finally { clearTimeout(timeout); }
     };

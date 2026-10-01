@@ -28,6 +28,8 @@
     "refreshPageOnFocus": true,
     "accountGateAllEntrypoints": true,
     "logsRedacted": false,
+    "credentialShapeDiagnostics": true,
+    "credentialValuesPersisted": false,
     "normalListMinCooldownMs": 10000,
     "realtimeListMinCooldownMs": 500,
     "failureBackoffMaxMs": 60000,
