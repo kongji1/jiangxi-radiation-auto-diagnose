@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         江西省县域医共体 - 自动诊断候选
 // @namespace    local.jiangxi.radiation
-// @version      0.8.24
+// @version      0.8.25
 // @updateURL   https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @downloadURL https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @description  以页面实时推送为主、轻量协议探测为兜底，按可配置规则识别后优先通过系统协议进入诊断；支持可控开发者诊断日志。
@@ -248,7 +248,7 @@
     console.info(`[自动诊断][开发者] ${JSON.stringify(item)}`);
   }
   function developerLogText() {
-    return JSON.stringify({ version: '0.8.24', exportedAt: new Date().toISOString(), events: debugEvents }, null, 2);
+    return JSON.stringify({ version: '0.8.25', exportedAt: new Date().toISOString(), events: debugEvents }, null, 2);
   }
   function developerModeStateText() {
     if (!config.developerMode) return '当前关闭';
@@ -933,11 +933,21 @@
     });
     try {
       await ensureSessionIdentity();
-      const { response, payload: json } = await fetchJson('/api/ct/rays/rep/list', {
+      let { response, payload: json } = await fetchJson('/api/ct/rays/rep/list', {
         method: 'POST', credentials: 'include',
         headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
         body: JSON.stringify(radiationListPayload(options))
       }, options.timeoutMs || 5000);
+      // 某些部署对组合筛选返回 2002。退回到轻量的全量最近列表，再由客户端过滤，
+      // 避免服务端筛选错误让实时轮询进入退避状态。
+      if (json?.code === 2002 && !options.ignoreStatusFilter) {
+        developerLog('列表筛选退回客户端过滤', { source: options.reason || 'list', code: json.code });
+        ({ response, payload: json } = await fetchJson('/api/ct/rays/rep/list', {
+          method: 'POST', credentials: 'include',
+          headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+          body: JSON.stringify(radiationListPayload({ ...options, ignoreStatusFilter: true, ignoreModalityFilter: true, ignoreInstitutionFilter: true }))
+        }, options.timeoutMs || 5000));
+      }
       const records = json?.data?.records || json?.data?.list || (Array.isArray(json?.data) ? json.data : []);
       if (!response.ok || json?.code !== 200 || !Array.isArray(records)) {
         developerLog('列表请求结果', { source: options.reason || 'list', ok: false, httpOk: !!response.ok, code: json?.code ?? null, count: 0, durationMs: Date.now() - startedAt });
@@ -1070,10 +1080,12 @@
     }).filter(Boolean))];
   }
   function statusProbePayload() {
-    const payload = radiationListPayload({ pageSize: 1 });
-    payload.reportStatusCodeList = probeStatusCodes();
-    payload.modalityList = Array.isArray(config.modalities) ? [...config.modalities] : [];
-    if (config.applyInstitution?.length === 1) payload.applyOrgName = config.applyInstitution[0];
+    // statusNum 对带 reportStatusCodeList 的请求返回 code=2002（权限/筛选组合不被服务端接受）。
+    // 状态探测只需要判断全局计数变化，具体的待诊断、锁定和其它筛选继续在客户端执行。
+    const payload = radiationListPayload({ pageSize: 1, ignoreStatusFilter: true, ignoreModalityFilter: true, ignoreInstitutionFilter: true });
+    payload.reportStatusCodeList = [];
+    payload.modalityList = [];
+    payload.applyOrgName = '';
     return payload;
   }
   function statusHash(data) {
