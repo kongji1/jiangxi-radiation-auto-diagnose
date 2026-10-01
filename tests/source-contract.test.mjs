@@ -24,7 +24,10 @@ const required = [
   ['interactive self-check', /runSelfCheck/],
   ['TOKEN_FAIL recovery', /__tokenRecoveryRetry/],
   ['automatic re-auth navigation', /会话自愈调度/],
-  ['no password persistence', /directPassword = ''/]
+  ['no password persistence', /directPassword = ''/],
+  ['radiation route guard', /pathname !== '\/radiation'/],
+  ['route cleanup', /stopRuntime\('route-exit'\)/],
+  ['narrow header settings binding', /\.el-table__header-wrapper/]
 ];
 
 const missing = required.filter(([, pattern]) => !pattern.test(source));
@@ -36,6 +39,10 @@ if (/password\s*[:=]\s*['"][^'"]+['"]/.test(source)) {
   throw new Error('source contract failed: possible plaintext password literal');
 }
 if (!/raw\.githubusercontent\.com/.test(updateTool)) throw new Error('GitHub update tool missing raw URL');
+const hotUpdateHelper = fs.readFileSync(path.join(root, 'tools', 'configure-github-hot-update.mjs'), 'utf8');
+if (!/readFileSync\(sourcePath, 'utf8'\)/.test(hotUpdateHelper) || !/writeFileSync\(sourcePath, source/.test(hotUpdateHelper)) {
+  throw new Error('GitHub hot-update helper must use explicit UTF-8 Node I/O');
+}
 
 const state = JSON.parse(fs.readFileSync(path.join(root, 'PROJECT_STATE.json'), 'utf8'));
 if (state.version !== '0.8.18') throw new Error(`PROJECT_STATE version mismatch: ${state.version}`);
