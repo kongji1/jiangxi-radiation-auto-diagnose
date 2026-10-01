@@ -6,7 +6,7 @@ Tampermonkey 会读取用户脚本头部的 `@updateURL` 和 `@downloadURL`。�
 
 ## 当前状态
 
-本地项目原来没有 Git 仓库，也没有可用的 GitHub CLI 登录态，因此没有擅自创建或推送到未知远程仓库。真实仓库地址确定后，再把下面两行加入脚本元数据：
+本地项目已有 Git 仓库；发布必须绑定到用户明确指定的远程仓库，不能擅自推送到未知地址。真实仓库地址确定后，再把下面两行加入脚本元数据：
 
 当前配置目标 `kongji1/jiangxi-radiation-auto-diagnose` 仍返回 GitHub 404，且已连接的 GitHub MCP 没有创建仓库接口；因此 Raw 热更新地址已经写入源码，但在仓库真正创建并推送前不会宣称热更新已生效。
 
@@ -33,7 +33,7 @@ powershell -ExecutionPolicy Bypass -File tools/verify-release.ps1
 powershell -ExecutionPolicy Bypass -File tools/publish-github.ps1 -Repository kongji1/jiangxi-radiation-auto-diagnose
 ```
 
-脚本会先执行完整发布检查，再验证远端仓库、推送当前提交，并读取 Raw 文件确认版本为 `0.8.34`。仓库不存在或 Raw 仍返回 404 时会直接失败。
+脚本会先执行完整发布检查，再验证远端仓库、推送当前提交，并读取 Raw 文件确认版本为当前源码版本 `0.8.35`。仓库不存在或 Raw 仍返回 404 时会直接失败。
 
 在项目根目录运行：
 
@@ -60,3 +60,4 @@ GitHub Actions 会在每次 push 和 pull request 上执行语法、源码契约
 该工具只写入 GitHub Raw 地址，不会提交或推送，也不会读取任何凭据。
 
 GitHub 推送只解决代码分发，不等同于业务页面已经加载新脚本；运行态仍需浏览器证据确认。
+
