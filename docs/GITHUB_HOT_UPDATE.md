@@ -8,6 +8,8 @@ Tampermonkey 会读取用户脚本头部的 `@updateURL` 和 `@downloadURL`。�
 
 本地项目原来没有 Git 仓库，也没有可用的 GitHub CLI 登录态，因此没有擅自创建或推送到未知远程仓库。真实仓库地址确定后，再把下面两行加入脚本元数据：
 
+当前配置目标 `kongji1/jiangxi-radiation-auto-diagnose` 仍返回 GitHub 404，且已连接的 GitHub MCP 没有创建仓库接口；因此 Raw 热更新地址已经写入源码，但在仓库真正创建并推送前不会宣称热更新已生效。
+
 ```text
 // @updateURL   https://raw.githubusercontent.com/<owner>/<repo>/main/jiangxi-radiation-auto-diagnose.user.js
 // @downloadURL https://raw.githubusercontent.com/<owner>/<repo>/main/jiangxi-radiation-auto-diagnose.user.js
