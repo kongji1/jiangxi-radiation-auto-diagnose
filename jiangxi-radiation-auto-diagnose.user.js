@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         江西省县域医共体 - 自动诊断候选
 // @namespace    local.jiangxi.radiation
-// @version      0.8.31
+// @version      0.8.32
 // @updateURL   https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @downloadURL https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @description  以页面实时推送为主、轻量协议探测为兜底，按可配置规则识别后优先通过系统协议进入诊断；支持可控开发者诊断日志。
@@ -71,6 +71,8 @@
     examNamesExtra: [],
     // 动态收集当前列表中出现过的检查项目，供设置界面勾选。
     examNamesCatalog: [],
+    // “更新所有可选项目”会把其它动态表头的选项也缓存到这里，避免翻页后选项消失。
+    columnOptionsCatalog: { checkHospitals: [], bodyParts: [], diagnosisDoctors: [], applyInstitution: [] },
     // 兼容旧版本字段；新版本使用 examSiteCount，默认不限检查部位数量。
     singleSiteOnly: false,
     examSiteCount: { min: null, max: null },
@@ -255,7 +257,7 @@
     console.info(`[自动诊断][开发者] ${JSON.stringify(item)}`);
   }
   function developerLogText() {
-    return JSON.stringify({ version: '0.8.31', exportedAt: new Date().toISOString(), events: debugEvents }, null, 2);
+    return JSON.stringify({ version: '0.8.32', exportedAt: new Date().toISOString(), events: debugEvents }, null, 2);
   }
   function developerModeStateText() {
     if (!config.developerMode) return '当前关闭';
@@ -1668,13 +1670,13 @@
         let options = name === 'examNamesExtra' ? availableExamOptions() : baseOptions;
         if (DYNAMIC_GROUP_FIELDS[name]) {
           const current = queryBodyRows().map(rowData).map(d => d[DYNAMIC_GROUP_FIELDS[name]]).filter(Boolean);
-          options = ['不限', ...new Set([...(config[name] || []), ...current].map(norm).filter(Boolean))];
+          options = ['不限', ...new Set([...(config[name] || []), ...(config.columnOptionsCatalog?.[name] || []), ...current].map(norm).filter(Boolean))];
         }
         const host = box.querySelector(`[data-group="${name}"]`); if (!host) continue;
         const label = {reportStatuses:'报告状态',imageStatuses:'影像状态',encounterTypes:'就诊类型',gender:'性别',modalities:'检查类型',examNames:'检查项目',examNamesExtra:'可选项目',checkHospitals:'检查医院',bodyParts:'检查部位',diagnosisDoctors:'诊断医生'}[name];
         host.innerHTML = `<span class="jx-group-label">${label}：</span>` + options.map(x => `<label class="jx-check"><input type="checkbox" data-group-name="${name}" value="${esc(x)}"><span>${esc(x)}</span></label>`).join('');
       }
-      const values = [...new Set([...(config.applyInstitution || []), ...queryBodyRows().map(rowData).map(d => d.institution).filter(Boolean)])];
+      const values = [...new Set([...(config.applyInstitution || []), ...(config.columnOptionsCatalog?.applyInstitution || []), ...queryBodyRows().map(rowData).map(d => d.institution).filter(Boolean)])];
       const host = box.querySelector('[data-group="applyInstitution"]');
       if (host) host.innerHTML = '<span class="jx-group-label">申请机构：</span>' + ['不限', ...values].map(x => `<label class="jx-check"><input type="checkbox" data-group-name="applyInstitution" value="${esc(x)}"><span>${esc(x === '不限' ? '不限申请机构' : x)}</span></label>`).join('');
       box.querySelectorAll('input[data-group-name]').forEach(check => check.addEventListener('change', () => {
@@ -1731,9 +1733,20 @@
       const fromApi = records.flatMap(record => String(record?.examName || record?.exam || '').split(config.examSeparators).map(norm).filter(Boolean));
       const options = [...new Set([...availableExamOptions(), ...fromApi])].filter(x => !DEFAULT_CONFIG.examNames.some(y => norm(y) === norm(x)));
       config.examNamesCatalog = [...new Set([...(config.examNamesCatalog || []), ...options])];
+      const dynamic = {
+        checkHospitals: records.map(record => record?.checkOrgName || record?.checkOrg),
+        bodyParts: records.map(record => record?.bodyPartName || record?.bodyPart || record?.checkPartName || record?.checkPart),
+        diagnosisDoctors: records.map(record => record?.reportDoc),
+        applyInstitution: records.map(record => record?.applyOrgName || record?.applyOrg)
+      };
+      config.columnOptionsCatalog = config.columnOptionsCatalog || {};
+      for (const [name, values] of Object.entries(dynamic)) {
+        config.columnOptionsCatalog[name] = [...new Set([...(config.columnOptionsCatalog[name] || []), ...values.map(norm).filter(Boolean)])];
+      }
       saveConfig();
       render();
-      msg(`已更新 ${options.length} 个可选项目`);
+      const dynamicCount = Object.values(dynamic).flat().map(norm).filter(Boolean).length;
+      msg(`已更新 ${options.length + dynamicCount} 个可选项目`);
     };
     box.querySelector('[data-a="reset"]').onclick = () => { config = structuredClone(DEFAULT_CONFIG); saveConfig(); render(); start(); msg('已恢复默认'); };
     box.querySelector('[data-a="saveProfile"]').onclick = () => { read(); const n = f('profileName').value.trim(); if (!n) return msg('请填写方案名'); const p = profiles(); p[n] = config; saveProfiles(p); render(); f('profile').value = n; msg('方案已保存'); };
