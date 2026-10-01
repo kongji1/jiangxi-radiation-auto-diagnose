@@ -1,5 +1,16 @@
 # 验证记录
 
+## 0.8.17 本地回归验证（2026-10-01）
+
+- `node --check jiangxi-radiation-auto-diagnose.user.js`：通过。
+- `node tests/source-contract.test.mjs`：通过，覆盖 13 项源码契约，包括协议入口、严格待诊断门禁、锁定跳过、年龄不限、项目/机构权重、结论优先、自愈选择器和密码不持久化。
+- `git diff --check`：通过。
+- 已新增 GitHub Actions 工作流 `.github/workflows/validate.yml`，每次 push 和 pull request 自动执行上述检查。
+- 已新增设置页“运行自检”，只读检查路由、页面行、账号门禁、登录会话和 `statusNum`，不修改报告状态。
+- 已增加表格行选择器自愈：配置选择器无结果时依次尝试业务表格和 Element Plus 常见结构。
+
+以下仍属于浏览器运行态验证，不能由本地测试替代：Tampermonkey 实际加载 0.8.17、登录会话下实时 WebSocket 字段、不同权重候选的真实排序、页面冻结后的恢复以及真实协议进入。
+
 ## 已完成的静态验证
 
 验证日期：2026-09-29。
