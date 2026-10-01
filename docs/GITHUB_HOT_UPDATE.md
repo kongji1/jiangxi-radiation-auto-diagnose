@@ -60,5 +60,3 @@ GitHub Actions 会在每次 push 和 pull request 上重复这两项检查。只
 该工具只写入 GitHub Raw 地址，不会提交或推送，也不会读取任何凭据。
 
 GitHub 推送只解决代码分发，不等同于业务页面已经加载新脚本；运行态仍需浏览器证据确认。
-
-

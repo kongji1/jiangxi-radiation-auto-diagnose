@@ -98,5 +98,3 @@ if (!/source-contract\.test\.mjs/.test(releaseTool) || !/captcha_ocr\.test\.py/.
 if (!/git ls-remote/.test(publishTool) || !/git push origin/.test(publishTool) || !/raw\.githubusercontent\.com/.test(publishTool)) throw new Error('GitHub publish tool incomplete');
 
 console.log(`source-contract: passed ${required.length} checks; version=${state.version}`);
-
-

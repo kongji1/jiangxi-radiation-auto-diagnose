@@ -50,5 +50,3 @@
 - 修改后先运行 `node --check .\\jiangxi-radiation-auto-diagnose.user.js`。
 - 不能把“源码已更新”当成“Tampermonkey 已加载”；必须在浏览器中确认脚本版本或实际日志。
 - 不使用与本项目无关的 CTMW/EDW 探测脚本；不把临时密钥、Cookie、患者信息或截图放入项目。
-
-

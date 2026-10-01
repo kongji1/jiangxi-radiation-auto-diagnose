@@ -170,5 +170,3 @@
 - The bridge is installed in the ignored `.captcha-ocr-venv` environment from `tools/requirements-captcha-ocr.txt` and runs on `127.0.0.1:18766`; `8766` is reserved by the existing OAuth proxy. Start it with `tools/start-captcha-ocr.ps1` and verify `GET /health` before testing login. The service is loopback-only and does not log images or answers.
 - 0.8.31 also rate-limits TOKEN_FAIL recovery to one session-identity refresh per 15 seconds and throttles the corresponding developer event to the same interval. The `/radiation` route protection and single retry remain unchanged; this reduces duplicate recovery traffic when `statusNum` repeatedly returns 2002.
 - Direct-login bootstrap now probes `/api/admin/user/info` before prompting for a password. This handles HttpOnly or delayed `Auth` cookies: an already logged-in page returns through the existing session and never shows the protocol-password dialog on refresh.
-
-
