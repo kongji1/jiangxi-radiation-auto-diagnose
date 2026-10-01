@@ -10,7 +10,7 @@ const updateTool = fs.readFileSync(path.join(root, 'tools', 'configure-github-ho
 execFileSync(process.execPath, ['--check', sourcePath], { stdio: 'inherit' });
 
 const required = [
-  ['metadata version', /@version\s+0\.8\.19/],
+  ['metadata version', /@version\s+0\.8\.20/],
   ['login route', /\/api\/admin\/userLogin\/login/],
   ['read-only status probe', /\/api\/ct\/rays\/rep\/statusNum/],
   ['read-only entry assertion', /assertAllowEnter/],
@@ -47,6 +47,6 @@ if (!/readFileSync\(sourcePath, 'utf8'\)/.test(hotUpdateHelper) || !/writeFileSy
 }
 
 const state = JSON.parse(fs.readFileSync(path.join(root, 'PROJECT_STATE.json'), 'utf8'));
-if (state.version !== '0.8.19') throw new Error(`PROJECT_STATE version mismatch: ${state.version}`);
+if (state.version !== '0.8.20') throw new Error(`PROJECT_STATE version mismatch: ${state.version}`);
 
 console.log(`source-contract: passed ${required.length} checks; version=${state.version}`);

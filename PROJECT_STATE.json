@@ -1,7 +1,7 @@
 {
   "project": "江西省县域医共体 - 自动诊断候选",
   "source": "jiangxi-radiation-auto-diagnose.user.js",
-  "version": "0.8.19",
+  "version": "0.8.20",
   "snapshotDate": "2026-10-01",
   "sourceOfTruth": "jiangxi-radiation-auto-diagnose.user.js",
   "handoff": "docs/AI_HANDOFF.md",

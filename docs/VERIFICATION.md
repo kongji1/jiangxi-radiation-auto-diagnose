@@ -61,5 +61,6 @@
 - TOKEN_FAIL 恢复策略限制为一次重试；仍失败时直接登录自愈调度有五分钟冷却，避免循环跳转和额外负载。
 - 0.8.18 route-guard patch：`node --check`、15 项源码契约和 `git diff --check` 通过；路由离开 `/radiation` 时会停止运行时计时器和 MutationObserver，并记录 `路由变化`。当前源码没有 `/setting/profile` 字符串，因此该跳转仍需在真实浏览器运行时用开发者记录确认来源。
 - 0.8.19 profile-redirect fix：浏览器存储日志已确认 `TOKEN_FAIL -> /login -> /setting/profile`；修复后 `/radiation` 中的 TOKEN_FAIL 只记录并保持当前页，自动流程不再导航 `/login`。当前仍需在 Tampermonkey 中确认 0.8.19 已加载。
+- 0.8.20 direct-login route：当页面直接打开 `/radiation`、协议登录开关开启、账号非空且没有 Auth Cookie 时，会先执行现有密码/验证码协议登录，再启动列表扫描；不要求用户先访问 `/login`。
 
 仍需浏览器验证：真实登录会话下触发 2002 后是否能恢复、直接登录跳转是否成功，以及 Tampermonkey 是否已加载 0.8.18。
