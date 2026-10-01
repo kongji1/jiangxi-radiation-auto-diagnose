@@ -1629,7 +1629,10 @@
     if (bootstrapped) return;
     bootstrapped = true;
     // 先完成同源协议登录，再启动列表探测；未启用时保持原有登录流程。
-    if (directLoginConfig().enabled && directLoginConfig().username && !document.cookie.includes('Auth=')) {
+    // 允许从 /radiation 直接触发协议登录：用户未主动打开 /login 时，
+    // 只要配置了账号，仍然可以完成登录后继续启动列表；/setting/profile 等其它路由不触发。
+    const directLoginRoute = currentUrl.pathname === '/login' || currentUrl.pathname === '/radiation';
+    if (directLoginRoute && directLoginConfig().enabled && String(directLoginConfig().username || '').trim() && !readCookie('Auth')) {
       const ok = await ensureDirectLogin();
       if (ok && currentUrl.pathname === '/login') {
         pageWindow().location.replace('/radiation');
