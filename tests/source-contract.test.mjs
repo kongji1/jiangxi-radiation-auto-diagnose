@@ -14,10 +14,10 @@ const publishTool = fs.readFileSync(path.join(root, 'tools', 'publish-github.ps1
 execFileSync(process.execPath, ['--check', sourcePath], { stdio: 'inherit' });
 
 const required = [
-  ['metadata version', /@version\s+0\.8\.30/],
+  ['metadata version', /@version\s+0\.8\.31/],
   ['login route', /\/api\/admin\/userLogin\/login/],
   ['read-only status probe', /\/api\/ct\/rays\/rep\/statusNum/],
-  ['unfiltered status probe fallback', /radiationListPayload\(\{ pageSize: 1, ignoreStatusFilter: true, ignoreModalityFilter: true, ignoreInstitutionFilter: true \}\)/],
+  ['unfiltered status probe fallback', /radiationListPayload\(\{ pageSize: 1, ignoreStatusFilter: true, ignoreModalityFilter: true, ignoreInstitutionFilter: true, ignoreBodyPartFilter: true \}\)/],
   ['client-side list fallback', /列表筛选退回客户端过滤/],
   ['unfiltered list fallback', /match: null, pageSize: 100, ignoreStatusFilter: true/],
   ['realtime server status gate', /__realtimeNeedsServerStatus/],
@@ -31,6 +31,10 @@ const required = [
   ['age-unlimited setting', /ageUnlimited/],
   ['exam weights', /examWeights/],
   ['institution weights', /institutionWeights/],
+  ['body-part filter', /bodyParts/],
+  ['hospital filter', /checkHospitals/],
+  ['diagnosis-doctor filter', /diagnosisDoctors/],
+  ['audit-time filter', /auditTime/],
   ['conclusion-only priority', /hasPreliminaryConclusion/],
   ['selector self-healing', /queryBodyRows/],
   ['interactive self-check', /runSelfCheck/],
@@ -84,9 +88,9 @@ if (!/def captcha_answer/.test(ocrServer) || !/fullmatch/.test(ocrServer) || !/1
 }
 
 const state = JSON.parse(fs.readFileSync(path.join(root, 'PROJECT_STATE.json'), 'utf8'));
-if (state.version !== '0.8.30') throw new Error(`PROJECT_STATE version mismatch: ${state.version}`);
+if (state.version !== '0.8.31') throw new Error(`PROJECT_STATE version mismatch: ${state.version}`);
 if (state.performance?.realtimeListMinCooldownMs !== 500) throw new Error('PROJECT_STATE realtime cooldown mismatch');
-if (!readme.includes('源码版本：`0.8.30`')) throw new Error('README version mismatch');
+if (!readme.includes('源码版本：`0.8.31`')) throw new Error('README version mismatch');
 if (!readme.includes('127.0.0.1:18766')) throw new Error('README OCR endpoint missing');
 if (!readme.includes('GPT6_MAINTENANCE.md')) throw new Error('README GPT-6 guide missing');
 if (!gpt6Guide.includes('dispatchDelayMs') || !gpt6Guide.includes('diagnosisActive')) throw new Error('GPT-6 maintenance guide incomplete');
@@ -94,4 +98,5 @@ if (!/source-contract\.test\.mjs/.test(releaseTool) || !/captcha_ocr\.test\.py/.
 if (!/git ls-remote/.test(publishTool) || !/git push origin/.test(publishTool) || !/raw\.githubusercontent\.com/.test(publishTool)) throw new Error('GitHub publish tool incomplete');
 
 console.log(`source-contract: passed ${required.length} checks; version=${state.version}`);
+
 

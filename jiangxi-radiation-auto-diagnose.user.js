@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         江西省县域医共体 - 自动诊断候选
 // @namespace    local.jiangxi.radiation
-// @version      0.8.30
+// @version      0.8.31
 // @updateURL   https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @downloadURL https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @description  以页面实时推送为主、轻量协议探测为兜底，按可配置规则识别后优先通过系统协议进入诊断；支持可控开发者诊断日志。
@@ -49,13 +49,17 @@
     patientNameContains: '',
     applicationNoContains: '',
     applyInstitution: [],               // [] 表示不限；填写后按行文本或数据属性匹配
+    checkHospitals: [],                 // [] 表示不限；动态来源于“检查医院”表头/协议记录
+    bodyParts: [],                      // [] 表示不限；动态来源于“检查部位”表头/协议记录
     // 数值越大越优先；未列出的项目按 0 处理。设置界面支持“名称=权重”逐行编辑。
     examWeights: ['头颅平扫=100', '颅脑平扫=95', '腰椎间盘平扫=80', '颈椎间盘平扫=75', '肋骨平扫=10'],
     institutionWeights: [],
     preliminaryReportFirst: true,
+    diagnosisDoctors: [],               // [] 表示不限；动态来源于“诊断医生”表头/协议记录
     auditDoctors: [],                   // [] 表示不限
     applicationTime: { mode: 'window', minMinutes: 5, maxMinutes: 30, days: 3, start: '00:00' },
     diagnosisTime: { mode: 'all', days: 3, start: '00:00' },
+    auditTime: { mode: 'all', days: 3, start: '00:00' },
     examNames: [
       '头颅平扫',
       '颅脑平扫',
@@ -93,7 +97,7 @@
   let probeTimer = null;
   let running = false;
   let entryRunning = false;
-  // 进入诊断后冻结候选处理，直到返回列表页；避免一个医生会话同时打开多个客户。
+  // 诊断锁只限制再次进入其它客户；列表、WebSocket 和状态观察继续运行。
   let diagnosisActive = false;
   let probeRunning = false;
   let listRefreshRunning = false;
@@ -251,7 +255,7 @@
     console.info(`[自动诊断][开发者] ${JSON.stringify(item)}`);
   }
   function developerLogText() {
-    return JSON.stringify({ version: '0.8.30', exportedAt: new Date().toISOString(), events: debugEvents }, null, 2);
+    return JSON.stringify({ version: '0.8.31', exportedAt: new Date().toISOString(), events: debugEvents }, null, 2);
   }
   function developerModeStateText() {
     if (!config.developerMode) return '当前关闭';
@@ -650,7 +654,9 @@
     const modality = norm(at('检查类型')?.innerText);
     const applyTime = norm(at('申请时间')?.innerText);
     const exam = norm(at('检查项目')?.innerText);
+    const bodyPart = norm(at('检查部位')?.innerText);
     const diagnosisTime = norm(at('诊断时间')?.innerText);
+    const auditTime = norm(at('审核时间')?.innerText);
     const doctor = norm(at('诊断医生')?.innerText);
     const auditDoctor = norm(at('审核医生')?.innerText);
     const conclusion = norm(at('结论')?.innerText || row.dataset?.conclusion || row.dataset?.reportConclusion);
@@ -662,7 +668,7 @@
     const hospital = norm(at('检查医院')?.innerText);
     const checkbox = row.querySelector('input[type="checkbox"]');
     const key = checkbox?.id || [patient, applyTime, modality, exam].join('|');
-    return { row, record: null, patient, status, statusCode, locked: domRowLocked(row), imageStatus, modality, applyTime, diagnosisTime, doctor, auditDoctor, conclusion, description, exam, applicationNo: applyNo, institution, hospital, rowText, age: parseAge(patient), gender: parseGender(patient), key };
+    return { row, record: null, patient, status, statusCode, locked: domRowLocked(row), imageStatus, modality, applyTime, diagnosisTime, auditTime, doctor, diagnosisDoctor: doctor, auditDoctor, conclusion, description, exam, bodyPart, applicationNo: applyNo, institution, hospital, rowText, age: parseAge(patient), gender: parseGender(patient), key };
   }
 
   function queryBodyRows(root = document) {
@@ -690,14 +696,15 @@
     const locked = recordLockState(record);
     const modality = norm(Array.isArray(record.modality) ? record.modality.join(',') : (record.modality || record.modalityName));
     const applyTime = norm(record.checkinTime || record.applyTime || record.initiateTime);
+    const bodyPart = norm(record.bodyPartName || record.bodyPart || record.checkPartName || record.checkPart);
     const conclusion = norm(record.conclusion || record.reportConclusion || record.diagnosisConclusion || record.opinion || record.reportOpinion);
     const description = norm(record.description || record.reportDescription || record.reportDesc || record.remark || record.remarkText);
-    const rowText = norm([patient, status, imageStatus, modality, applyTime, exam, record.applyOrgName, applicationNo, record.orderId].filter(Boolean).join('|'));
+    const rowText = norm([patient, status, imageStatus, modality, applyTime, exam, bodyPart, record.applyOrgName, record.checkOrgName, applicationNo, record.orderId].filter(Boolean).join('|'));
     return {
       row: null, record, patient, status, statusCode, locked, imageStatus, modality,
       applyTime,
-      diagnosisTime: norm(record.repTime || record.diagnosisTime), doctor: norm(record.reportDoc),
-      auditDoctor: norm(record.auditDoc || record.auditDoctor), exam, applicationNo, conclusion, description,
+      diagnosisTime: norm(record.repTime || record.diagnosisTime), auditTime: norm(record.auditTime || record.auditDate), doctor: norm(record.reportDoc), diagnosisDoctor: norm(record.reportDoc),
+      auditDoctor: norm(record.auditDoc || record.auditDoctor), exam, bodyPart, applicationNo, conclusion, description,
       institution: norm(record.applyOrgName || record.applyOrg), hospital: norm(record.checkOrgName || record.checkOrg),
       rowText, age: Number.isFinite(age) ? age : null, gender: gender || parseGender(patient),
       key: repUid ? `rep:${repUid}` : [patient, applicationNo, exam].join('|')
@@ -781,9 +788,13 @@
     if (config.patientNameContains && !norm(d.patient).includes(norm(config.patientNameContains))) reasons.push('姓名');
     if (config.applicationNoContains && !norm(d.applicationNo || d.rowText).includes(norm(config.applicationNoContains))) reasons.push('申请单号');
     if (config.applyInstitution?.length && !config.applyInstitution.some(x => norm(d.institution || d.rowText).includes(norm(x)))) reasons.push('申请机构');
+    if (config.checkHospitals?.length && !config.checkHospitals.some(x => norm(d.hospital || d.rowText).includes(norm(x)))) reasons.push('检查医院');
+    if (config.bodyParts?.length && !config.bodyParts.some(x => norm(d.bodyPart || d.rowText).includes(norm(x)))) reasons.push('检查部位');
+    if (config.diagnosisDoctors?.length && !config.diagnosisDoctors.some(x => norm(d.diagnosisDoctor || d.doctor || d.rowText).includes(norm(x)))) reasons.push('诊断医生');
     if (config.auditDoctors?.length && !config.auditDoctors.some(x => norm(d.auditDoctor || d.doctor).includes(norm(x)))) reasons.push('医生');
     if (!matchTime(d.applyTime, config.applicationTime)) reasons.push('申请时间');
     if (!matchTime(d.diagnosisTime, config.diagnosisTime)) reasons.push('诊断审核时间');
+    if (!matchTime(d.auditTime, config.auditTime)) reasons.push('审核时间');
     const parts = d.exam.split(config.examSeparators).map(norm).filter(Boolean);
     const siteRule = config.examSiteCount || (config.singleSiteOnly ? { min: 1, max: 1 } : { min: null, max: null });
     if (siteRule.min != null && parts.length < Number(siteRule.min)) reasons.push('检查部位过少');
@@ -934,6 +945,7 @@
     if (!options.ignoreStatusFilter) payload.reportStatusCodeList = probeStatusCodes();
     if (!options.ignoreModalityFilter) payload.modalityList = Array.isArray(config.modalities) ? [...config.modalities] : [];
     if (!options.ignoreInstitutionFilter && config.applyInstitution?.length === 1) payload.applyOrgName = config.applyInstitution[0];
+    if (!options.ignoreBodyPartFilter && config.bodyParts?.length === 1) payload.bodyPartName = config.bodyParts[0];
     if (match) {
       const patientName = norm(match.patient).split(/门诊|急诊|住院|体检/)[0];
       if (patientName) payload.patName = patientName;
@@ -966,7 +978,7 @@
         ({ response, payload: json } = await fetchJson('/api/ct/rays/rep/list', {
           method: 'POST', credentials: 'include',
           headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-          body: JSON.stringify(radiationListPayload({ ...options, match: null, pageSize: 100, ignoreStatusFilter: true, ignoreModalityFilter: true, ignoreInstitutionFilter: true }))
+          body: JSON.stringify(radiationListPayload({ ...options, match: null, pageSize: 100, ignoreStatusFilter: true, ignoreModalityFilter: true, ignoreInstitutionFilter: true, ignoreBodyPartFilter: true }))
         }, options.timeoutMs || 5000));
       }
       const records = json?.data?.records || json?.data?.list || (Array.isArray(json?.data) ? json.data : []);
@@ -1104,7 +1116,7 @@
   function statusProbePayload() {
     // statusNum 对带 reportStatusCodeList 的请求返回 code=2002（权限/筛选组合不被服务端接受）。
     // 状态探测只需要判断全局计数变化，具体的待诊断、锁定和其它筛选继续在客户端执行。
-    const payload = radiationListPayload({ pageSize: 1, ignoreStatusFilter: true, ignoreModalityFilter: true, ignoreInstitutionFilter: true });
+    const payload = radiationListPayload({ pageSize: 1, ignoreStatusFilter: true, ignoreModalityFilter: true, ignoreInstitutionFilter: true, ignoreBodyPartFilter: true });
     payload.reportStatusCodeList = [];
     payload.modalityList = [];
     payload.applyOrgName = '';
@@ -1632,16 +1644,17 @@
         <fieldset><legend>登录账号</legend><div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap"><span>当前账号：<b data-a="currentAccount">读取中</b></span><button type="button" data-a="useCurrentAccount">仅允许当前账号</button><button type="button" data-a="clearAccountLimit">清空限制</button></div><label>允许自动诊断的账号（留空不限）<input data-f="allowedAccounts" placeholder="可填账号编号或登录名，多个用逗号分隔"></label><small style="color:#909399">支持账号编号和登录名；留空时所有登录账号都启用。</small><div style="margin-top:8px;padding-top:7px;border-top:1px dashed #dcdfe6"><label><input type="checkbox" data-f="directLoginEnabled"> 未登录时启用协议登录</label><label>协议登录账号<input data-f="directLoginUsername" autocomplete="username" placeholder="账号编号"></label><label><input type="checkbox" data-f="directLoginOcrEnabled"> 使用本机 OCR 自动填写验证码</label><label>OCR 地址<input data-f="directLoginOcrEndpoint" value="http://127.0.0.1:18766/ocr" placeholder="http://127.0.0.1:18766/ocr"></label><div style="display:flex;gap:6px;margin-top:5px"><button type="button" data-a="directLoginNow">立即协议登录</button></div><small style="color:#909399">密码只在点击登录时临时输入，不写入配置。验证码优先使用本机 ddddocr，识别失败再显示手工输入。</small></div></fieldset>
         <fieldset><legend>报告/影像状态</legend><div class="jx-checks" data-group="reportStatuses"></div><div class="jx-checks" data-group="imageStatuses"></div></fieldset>
         <fieldset><legend>患者信息</legend><div class="jx-checks" data-group="encounterTypes"></div><div class="jx-checks" data-group="gender"></div><label class="jx-check"><input type="checkbox" data-f="ageUnlimited"> 年龄不限</label><div class="jx-grid"><label>年龄从<input data-f="ageMin" type="number"></label><label>年龄到<input data-f="ageMax" type="number"></label><label>姓名包含<input data-f="patientNameContains"></label><label>申请单号包含<input data-f="applicationNoContains"></label></div></fieldset>
-        <fieldset><legend>检查与机构</legend><div class="jx-checks" data-group="modalities"></div><div class="jx-checks" data-group="applyInstitution"></div><div class="jx-checks" data-group="examNames"></div><div class="jx-exam-head"><span>其他检查项目</span><button type="button" data-a="refreshExamOptions" title="从当前列表更新全部可勾选项目">更新所有可选项目</button></div><div class="jx-checks" data-group="examNamesExtra"></div><small style="color:#909399">检查项目勾选“不限”即可匹配全部项目；权重越大越优先，格式为“项目=权重”，每行一项。</small><label>检查项目权重<textarea data-f="examWeights" rows="4" placeholder="头颅平扫=100&#10;肋骨平扫=10"></textarea></label><label>申请机构权重<textarea data-f="institutionWeights" rows="3" placeholder="机构名称=权重"></textarea></label><label class="jx-check"><input type="checkbox" data-f="preliminaryReportFirst"> 有结论的初写报告优先</label><small style="color:#909399">只识别结论字段；描述、备注不会被当作结论。没有结论的记录仍可处理，只是排序靠后。</small><div class="jx-grid"><label>检查部位最少数量<select data-f="siteMin"><option value="">不限</option><option value="1">1 个</option><option value="2">2 个</option><option value="3">3 个</option><option value="4">4 个</option><option value="5">5 个</option></select></label><label>检查部位最多数量<select data-f="siteMax"><option value="">不限</option><option value="1">1 个</option><option value="2">2 个</option><option value="3">3 个</option><option value="4">4 个</option><option value="5">5 个</option></select></label></div><label>审核/诊断医生（留空不限）<input data-f="auditDoctors"></label></fieldset>
+        <fieldset><legend>检查与机构</legend><div class="jx-checks" data-group="modalities"></div><div class="jx-checks" data-group="applyInstitution"></div><div class="jx-checks" data-group="checkHospitals"></div><div class="jx-checks" data-group="bodyParts"></div><div class="jx-checks" data-group="examNames"></div><div class="jx-exam-head"><span>其他检查项目</span><button type="button" data-a="refreshExamOptions" title="从当前列表更新全部可勾选项目">更新所有可选项目</button></div><div class="jx-checks" data-group="examNamesExtra"></div><small style="color:#909399">检查项目、检查部位、医院和机构均可直接勾选“不限”；权重越大越优先，格式为“项目=权重”，每行一项。</small><label>检查项目权重<textarea data-f="examWeights" rows="4" placeholder="头颅平扫=100&#10;肋骨平扫=10"></textarea></label><label>申请机构权重<textarea data-f="institutionWeights" rows="3" placeholder="机构名称=权重"></textarea></label><label class="jx-check"><input type="checkbox" data-f="preliminaryReportFirst"> 有结论的初写报告优先</label><small style="color:#909399">只识别结论字段；描述、备注不会被当作结论。没有结论的记录仍可处理，只是排序靠后。</small><div class="jx-grid"><label>检查部位最少数量<select data-f="siteMin"><option value="">不限</option><option value="1">1 个</option><option value="2">2 个</option><option value="3">3 个</option><option value="4">4 个</option><option value="5">5 个</option></select></label><label>检查部位最多数量<select data-f="siteMax"><option value="">不限</option><option value="1">1 个</option><option value="2">2 个</option><option value="3">3 个</option><option value="4">4 个</option><option value="5">5 个</option></select></label></div><div class="jx-checks" data-group="diagnosisDoctors"></div><label>审核医生（留空不限）<input data-f="auditDoctors"></label></fieldset>
         <fieldset><legend>申请时间</legend><div class="jx-grid"><label>快捷范围<select data-f="applicationTimeMode"><option value="window">最近 5–30 分钟</option><option value="all">不限</option><option value="today">当天</option><option value="recent">最近 N 天</option><option value="fromTime">当天从指定时间</option></select></label><label>最早分钟<input data-f="applicationTimeMin" type="number" min="0" step="1"></label><label>最晚分钟<input data-f="applicationTimeMax" type="number" min="1" step="1"></label><label>最近天数<input data-f="applicationTimeDays" type="number" min="0" step="1"></label><label>开始时间<input data-f="applicationTimeStart" type="time"></label></div><small style="color:#909399">“最近 5–30 分钟”表示 5 分钟内不处理，超过 30 分钟也不处理。</small></fieldset>
-        <details><summary>诊断/审核时间（通常不用，默认不限）</summary><div class="jx-grid"><label>模式<select data-f="diagnosisTimeMode"><option value="all">不限</option><option value="today">当天</option><option value="recent">最近 N 天</option><option value="fromTime">当天从指定时间</option></select></label><label>最近天数<input data-f="diagnosisTimeDays" type="number" min="0"></label><label>开始时间<input data-f="diagnosisTimeStart" type="time"></label></div></details>
+        <details><summary>诊断/审核时间（通常不用，默认不限）</summary><div class="jx-grid"><label>诊断时间模式<select data-f="diagnosisTimeMode"><option value="all">不限</option><option value="today">当天</option><option value="recent">最近 N 天</option><option value="fromTime">当天从指定时间</option></select></label><label>诊断最近天数<input data-f="diagnosisTimeDays" type="number" min="0"></label><label>诊断开始时间<input data-f="diagnosisTimeStart" type="time"></label><label>审核时间模式<select data-f="auditTimeMode"><option value="all">不限</option><option value="today">当天</option><option value="recent">最近 N 天</option><option value="fromTime">当天从指定时间</option></select></label><label>审核最近天数<input data-f="auditTimeDays" type="number" min="0"></label><label>审核开始时间<input data-f="auditTimeStart" type="time"></label></div></details>
         <details><summary>高级：表格选择器与操作按钮</summary><label>诊断操作图标序号<input data-f="diagnoseOperatorIndex" type="number" min="0" style="width:60px"></label><label>待诊断状态值<input data-f="pendingStatusValue"></label><label>表格行选择器<input data-f="bodyRows"></label><label>操作项选择器<input data-f="operatorItems"></label></details>
         <div class="jx-panel-actions" style="display:flex;gap:7px;margin-top:10px"><button type="button" data-a="apply" style="background:#409eff;color:white;border:0;border-radius:4px;padding:7px 14px">应用并保存</button><button type="button" data-a="reset">恢复默认</button><button type="button" data-a="export">导出配置</button><button type="button" data-a="import">导入配置</button><span data-a="msg" style="color:#67c23a;align-self:center"></span></div>
       </div>`;
     document.body.appendChild(box);
     const style = document.createElement('style'); style.textContent = '#jx-auto-diagnose-panel .jx-panel-header{position:sticky;top:0;z-index:3;flex:0 0 auto;box-shadow:0 1px 5px #0002}#jx-auto-diagnose-panel .jx-panel-content{overscroll-behavior:contain}#jx-auto-diagnose-panel .jx-panel-actions{position:sticky;bottom:0;z-index:2;background:#fff;padding:8px 0 2px;box-shadow:0 -1px 5px #0001}#jx-auto-diagnose-panel fieldset{border:1px solid #dcdfe6;border-radius:6px;margin:7px 0;padding:7px}#jx-auto-diagnose-panel legend{padding:0 4px;color:#409eff}#jx-auto-diagnose-panel label{display:block;margin:4px 0}#jx-auto-diagnose-panel input,#jx-auto-diagnose-panel select,#jx-auto-diagnose-panel textarea{box-sizing:border-box;padding:4px;border:1px solid #dcdfe6;border-radius:4px;margin-top:2px;width:100%;font:inherit}#jx-auto-diagnose-panel .jx-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 10px}#jx-auto-diagnose-panel .jx-checks{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;margin:4px 0}#jx-auto-diagnose-panel .jx-check{display:inline-flex;align-items:center;gap:3px;margin:0;color:#606266}#jx-auto-diagnose-panel .jx-check input{width:auto;margin:0}#jx-auto-diagnose-panel .jx-group-label{color:#909399;margin-right:3px}#jx-auto-diagnose-panel .jx-exam-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:7px;color:#909399}#jx-auto-diagnose-panel .jx-exam-head button{padding:3px 8px;color:#409eff;border-color:#b3d8ff;background:#ecf5ff}#jx-auto-diagnose-panel button{border:1px solid #c0c4cc;background:#fff;border-radius:4px;padding:5px 8px;cursor:pointer}#jx-auto-diagnose-panel button:focus-visible{outline:2px solid #409eff;outline-offset:1px}#jx-auto-diagnose-panel [data-a="close"]{min-width:34px;min-height:30px}#jx-auto-diagnose-panel .jx-dev-toggle{display:inline-flex;align-items:center;gap:4px;color:#e6a23c;font-weight:600}#jx-auto-diagnose-panel .jx-dev-toggle input{width:auto;margin:0}'; box.appendChild(style);
     const f = n => box.querySelector(`[data-f="${n}"]`);
-    const GROUPS = { reportStatuses: ['不限','待诊断','诊断中','待审核','审核中','已审核','已打印'], imageStatuses: ['不限','正常','异常'], encounterTypes: ['不限','门诊','急诊','住院','体检'], gender: ['不限','男','女'], modalities: ['不限','CT','MR','DR','DSA','乳腺'], examNames: ['不限', ...DEFAULT_CONFIG.examNames], examNamesExtra: [] };
+    const GROUPS = { reportStatuses: ['不限','待诊断','诊断中','待审核','审核中','已审核','已打印'], imageStatuses: ['不限','正常','异常'], encounterTypes: ['不限','门诊','急诊','住院','体检'], gender: ['不限','男','女'], modalities: ['不限','CT','MR','DR','DSA','乳腺'], examNames: ['不限', ...DEFAULT_CONFIG.examNames], examNamesExtra: [], checkHospitals: [], bodyParts: [], diagnosisDoctors: [] };
+    const DYNAMIC_GROUP_FIELDS = { checkHospitals: 'hospital', bodyParts: 'bodyPart', diagnosisDoctors: 'diagnosisDoctor' };
     function availableExamOptions() {
       const fromRows = queryBodyRows().flatMap(row => {
         const value = rowData(row).exam;
@@ -1652,9 +1665,13 @@
     }
     function drawGroups() {
       for (const [name, baseOptions] of Object.entries(GROUPS)) {
-        const options = name === 'examNamesExtra' ? availableExamOptions() : baseOptions;
+        let options = name === 'examNamesExtra' ? availableExamOptions() : baseOptions;
+        if (DYNAMIC_GROUP_FIELDS[name]) {
+          const current = queryBodyRows().map(rowData).map(d => d[DYNAMIC_GROUP_FIELDS[name]]).filter(Boolean);
+          options = ['不限', ...new Set([...(config[name] || []), ...current].map(norm).filter(Boolean))];
+        }
         const host = box.querySelector(`[data-group="${name}"]`); if (!host) continue;
-        const label = {reportStatuses:'报告状态',imageStatuses:'影像状态',encounterTypes:'就诊类型',gender:'性别',modalities:'检查类型',examNames:'检查项目',examNamesExtra:'可选项目'}[name];
+        const label = {reportStatuses:'报告状态',imageStatuses:'影像状态',encounterTypes:'就诊类型',gender:'性别',modalities:'检查类型',examNames:'检查项目',examNamesExtra:'可选项目',checkHospitals:'检查医院',bodyParts:'检查部位',diagnosisDoctors:'诊断医生'}[name];
         host.innerHTML = `<span class="jx-group-label">${label}：</span>` + options.map(x => `<label class="jx-check"><input type="checkbox" data-group-name="${name}" value="${esc(x)}"><span>${esc(x)}</span></label>`).join('');
       }
       const values = [...new Set([...(config.applyInstitution || []), ...queryBodyRows().map(rowData).map(d => d.institution).filter(Boolean)])];
@@ -1678,13 +1695,13 @@
       f('allowedAccounts').value = listValue(config.allowedAccounts);
       f('directLoginEnabled').checked = !!directLoginConfig().enabled; f('directLoginUsername').value = directLoginConfig().username || ''; f('directLoginOcrEnabled').checked = directLoginConfig().ocrEnabled !== false; f('directLoginOcrEndpoint').value = directLoginConfig().ocrEndpoint || 'http://127.0.0.1:18766/ocr';
       f('entryMode').value = config.entryMode || 'protocol-first';
-      for (const n of ['reportStatuses','imageStatuses','encounterTypes','gender','modalities','examNames','examNamesExtra']) setGroup(n, config[n]);
+      for (const n of ['reportStatuses','imageStatuses','encounterTypes','gender','modalities','examNames','examNamesExtra','checkHospitals','bodyParts','diagnosisDoctors']) setGroup(n, config[n]);
       setGroup('applyInstitution', config.applyInstitution);
       f('ageUnlimited').checked = !!config.age.unlimited; f('ageMin').value = config.age.min ?? ''; f('ageMax').value = config.age.max ?? ''; f('patientNameContains').value = config.patientNameContains || ''; f('applicationNoContains').value = config.applicationNoContains || '';
       f('examWeights').value = listValue(config.examWeights).replace(/, /g, '\n'); f('institutionWeights').value = listValue(config.institutionWeights).replace(/, /g, '\n'); f('preliminaryReportFirst').checked = config.preliminaryReportFirst !== false;
       f('auditDoctors').value = listValue(config.auditDoctors); f('siteMin').value = config.examSiteCount?.min ?? ''; f('siteMax').value = config.examSiteCount?.max ?? '';
       f('applicationTimeMode').value = config.applicationTime.mode; f('applicationTimeMin').value = config.applicationTime.minMinutes ?? 5; f('applicationTimeMax').value = config.applicationTime.maxMinutes ?? 30; f('applicationTimeDays').value = config.applicationTime.days ?? ''; f('applicationTimeStart').value = config.applicationTime.start || '00:00';
-      f('diagnosisTimeMode').value = config.diagnosisTime.mode; f('diagnosisTimeDays').value = config.diagnosisTime.days ?? ''; f('diagnosisTimeStart').value = config.diagnosisTime.start || '00:00';
+      f('diagnosisTimeMode').value = config.diagnosisTime.mode; f('diagnosisTimeDays').value = config.diagnosisTime.days ?? ''; f('diagnosisTimeStart').value = config.diagnosisTime.start || '00:00'; f('auditTimeMode').value = config.auditTime.mode; f('auditTimeDays').value = config.auditTime.days ?? ''; f('auditTimeStart').value = config.auditTime.start || '00:00';
       f('diagnoseOperatorIndex').value = config.selectors.diagnoseOperatorIndex; f('pendingStatusValue').value = config.pendingStatusValue; f('bodyRows').value = config.selectors.bodyRows; f('operatorItems').value = config.selectors.operatorItems;
       const ps = profiles(); f('profile').innerHTML = '<option value="">选择已保存方案</option>' + Object.keys(ps).sort().map(x => `<option>${esc(x)}</option>`).join('');
     }
@@ -1692,10 +1709,10 @@
       config.enabled = f('enabled').checked; config.developerMode = f('developerMode').checked; config.pageQueryRefresh = f('pageQueryRefresh').checked; config.pollMs = Math.max(1000, Number(f('pollMs').value) || 2000); config.statusProbeMs = Math.max(3000, Number(f('statusProbeMs').value) || 5000); config.listHeartbeatMs = Math.max(10000, Number(f('listHeartbeatMs').value) || 15000); config.clickDelayMs = Number(f('clickDelayMs').value) || 0; config.entryMode = f('entryMode').value || 'protocol-first';
       config.allowedAccounts = parseList(f('allowedAccounts').value);
       config.directLogin = { enabled: f('directLoginEnabled').checked, username: f('directLoginUsername').value.trim(), ocrEnabled: f('directLoginOcrEnabled').checked, ocrEndpoint: f('directLoginOcrEndpoint').value.trim() || 'http://127.0.0.1:18766/ocr' };
-      for (const n of ['reportStatuses','imageStatuses','encounterTypes','gender','modalities','examNames','examNamesExtra']) config[n] = getGroup(n);
+      for (const n of ['reportStatuses','imageStatuses','encounterTypes','gender','modalities','examNames','examNamesExtra','checkHospitals','bodyParts','diagnosisDoctors']) config[n] = getGroup(n);
       config.applyInstitution = getGroup('applyInstitution'); config.auditDoctors = parseList(f('auditDoctors').value);
       config.age.unlimited = f('ageUnlimited').checked; config.age.min = config.age.unlimited || f('ageMin').value === '' ? null : Number(f('ageMin').value); config.age.max = config.age.unlimited || f('ageMax').value === '' ? null : Number(f('ageMax').value); config.patientNameContains = f('patientNameContains').value.trim(); config.applicationNoContains = f('applicationNoContains').value.trim(); config.examWeights = parseList(f('examWeights').value.replace(/\n/g, ',')); config.institutionWeights = parseList(f('institutionWeights').value.replace(/\n/g, ',')); config.preliminaryReportFirst = f('preliminaryReportFirst').checked; config.examSiteCount = { min: f('siteMin').value === '' ? null : Number(f('siteMin').value), max: f('siteMax').value === '' ? null : Number(f('siteMax').value) };
-      config.applicationTime = { mode: f('applicationTimeMode').value, minMinutes: Number(f('applicationTimeMin').value) || 0, maxMinutes: Number(f('applicationTimeMax').value) || 0, days: Number(f('applicationTimeDays').value) || 0, start: f('applicationTimeStart').value || '00:00' }; config.diagnosisTime = { mode: f('diagnosisTimeMode').value, days: Number(f('diagnosisTimeDays').value) || 0, start: f('diagnosisTimeStart').value || '00:00' };
+      config.applicationTime = { mode: f('applicationTimeMode').value, minMinutes: Number(f('applicationTimeMin').value) || 0, maxMinutes: Number(f('applicationTimeMax').value) || 0, days: Number(f('applicationTimeDays').value) || 0, start: f('applicationTimeStart').value || '00:00' }; config.diagnosisTime = { mode: f('diagnosisTimeMode').value, days: Number(f('diagnosisTimeDays').value) || 0, start: f('diagnosisTimeStart').value || '00:00' }; config.auditTime = { mode: f('auditTimeMode').value, days: Number(f('auditTimeDays').value) || 0, start: f('auditTimeStart').value || '00:00' };
       config.pendingStatusValue = f('pendingStatusValue').value.trim() || '102501'; config.selectors.diagnoseOperatorIndex = Number(f('diagnoseOperatorIndex').value) || 0; config.selectors.bodyRows = f('bodyRows').value.trim() || DEFAULT_CONFIG.selectors.bodyRows; config.selectors.operatorItems = f('operatorItems').value.trim() || DEFAULT_CONFIG.selectors.operatorItems;
     }
     const msg = t => { const el = box.querySelector('[data-a="msg"]'); if (!el) return; el.textContent = t; setTimeout(() => { const current = box.querySelector('[data-a="msg"]'); if (current) current.textContent = ''; }, 1800); };
@@ -1710,7 +1727,7 @@
     box.querySelector('[data-a="refreshExamOptions"]').onclick = async () => {
       read();
       msg('正在更新可选项目…');
-      const records = await fetchRadiationRecords({ pageSize: 100, timeoutMs: 8000, ignoreApplicationTime: true, ignoreStatusFilter: true, ignoreModalityFilter: true, ignoreInstitutionFilter: true });
+      const records = await fetchRadiationRecords({ pageSize: 100, timeoutMs: 8000, ignoreApplicationTime: true, ignoreStatusFilter: true, ignoreModalityFilter: true, ignoreInstitutionFilter: true, ignoreBodyPartFilter: true });
       const fromApi = records.flatMap(record => String(record?.examName || record?.exam || '').split(config.examSeparators).map(norm).filter(Boolean));
       const options = [...new Set([...availableExamOptions(), ...fromApi])].filter(x => !DEFAULT_CONFIG.examNames.some(y => norm(y) === norm(x)));
       config.examNamesCatalog = [...new Set([...(config.examNamesCatalog || []), ...options])];
@@ -1803,4 +1820,5 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bootstrap, { once: true });
   else bootstrap();
 })();
+
 
