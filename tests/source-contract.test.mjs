@@ -51,6 +51,7 @@ const required = [
   ['runtime filter snapshot', /配置门禁快照/],
   ['developer rolling retention', /DEBUG_RETENTION_MS = 10 \* 60 \* 1000/],
   ['full candidate debug fields', /applicationNo: d\?\.applicationNo[\s\S]+patient: d\?\.patient/],
+  ['full record debug snapshot', /record: d\?\.record \|\| null/],
   ['developer event pruning', /pruneDeveloperEvents/],
   ['developer mode upgrade migration', /developerModeDebugWindowVersion !== SCRIPT_VERSION/],
   ['direct login from radiation', /directLoginRoute = currentUrl\.pathname === '\/login' \|\| currentUrl\.pathname === '\/radiation'/],

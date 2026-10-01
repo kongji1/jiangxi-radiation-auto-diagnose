@@ -251,6 +251,7 @@
       applicationNo: d?.applicationNo || '',
       patient: d?.patient || '',
       applyTime: d?.applyTime || '',
+      record: d?.record || null,
       status: norm(d?.status),
       statusCode: norm(d?.statusCode || d?.record?.reportStatusCode || d?.record?.checkStatusCode || d?.record?.statusCode),
       locked: !!(d?.locked || recordLockState(d?.record)),
