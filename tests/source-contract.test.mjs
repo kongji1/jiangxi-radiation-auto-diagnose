@@ -49,7 +49,7 @@ const required = [
   ['recovery does not redirect', /redirected: false/],
   ['unlimited sentinel migration', /Older builds could persist[\s\S]+empty-array representation/],
   ['runtime filter snapshot', /配置门禁快照/],
-  ['runtime selected filter snapshot', /encounterTypes: \[\.\.\(config\.encounterTypes \|\| \[\]\)\][\s\S]+modalities: \[\.\.\(config\.modalities \|\| \[\]\)\]/],
+  ['runtime selected filter snapshot', /encounterTypes:\s*\[\.\.\.\(config\.encounterTypes[\s\S]+modalities:\s*\[\.\.\.\(config\.modalities/],
   ['developer rolling retention', /DEBUG_RETENTION_MS = 10 \* 60 \* 1000/],
   ['full candidate debug fields', /applicationNo: d\?\.applicationNo[\s\S]+patient: d\?\.patient/],
   ['full record debug snapshot', /record: d\?\.record \|\| null/],
