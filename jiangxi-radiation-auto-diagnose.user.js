@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         江西省县域医共体 - 自动诊断候选
 // @namespace    local.jiangxi.radiation
-// @version      0.8.35
+// @version      0.8.36
 // @updateURL   https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @downloadURL https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @description  以页面实时推送为主、轻量协议探测为兜底，按可配置规则识别后优先通过系统协议进入诊断；支持可控开发者诊断日志。
@@ -20,14 +20,15 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.8.35';
+  const SCRIPT_VERSION = '0.8.36';
 
   // 所有业务规则和页面定位都集中在这里，也可以从表头设置弹窗进入配置面板修改。
   const DEFAULT_CONFIG = {
     configSchema: 2,
     enabled: true,
-    // 默认关闭；本次旧配置迁移会临时开启，关闭后会按用户选择持久化。
-    developerMode: false,
+    // 默认开启完整诊断记录；仅保留最近 10 分钟，关闭后按用户选择持久化。
+    developerMode: true,
+    developerModeDebugWindowVersion: '0.8.36',
     // [] 表示不限登录账号；填写账号编号或登录名后，仅对匹配账号启用自动诊断。
     allowedAccounts: [],
     // 协议登录只保存账号，不保存密码；密码仅在当前页面会话内存中使用。
@@ -140,6 +141,7 @@
   const seen = new Map();
   const REALTIME_HINT_EVENT = '__jx_auto_diagnose_ws_hint_v1';
   const DEBUG_EVENT_LIMIT = 240;
+  const DEBUG_RETENTION_MS = 10 * 60 * 1000;
   const DEBUG_EVENT_THROTTLE_MS = 3000;
   const DEBUG_STORAGE_KEY = 'jx-radiation-auto-diagnose-debug-v1';
   const debugEvents = [];
@@ -151,6 +153,7 @@
       const raw = GM_getValue(DEBUG_STORAGE_KEY, []);
       const events = typeof raw === 'string' ? JSON.parse(raw) : raw;
       if (Array.isArray(events)) debugEvents.push(...events.slice(-DEBUG_EVENT_LIMIT));
+      pruneDeveloperEvents();
     } catch (_) {}
   }
   loadDeveloperEvents();
@@ -163,9 +166,14 @@
       if (parsed.examSeparators?.__regexp) parsed.examSeparators = new RegExp(parsed.examSeparators.__regexp);
       if (typeof parsed.examNamesExtra === 'string') parsed.examNamesExtra = parsed.examNamesExtra.split(/[,，\n]/).map(norm).filter(Boolean);
       if (!Array.isArray(parsed.examNamesCatalog)) parsed.examNamesCatalog = [];
-      // 旧配置没有该字段：为当前排查临时打开一次；用户在设置中关闭后会保存为 false。
+      // 旧配置升级到完整十分钟调试窗口；用户在设置中关闭后会保存当前选择。
       if (parsed.developerMode == null) {
         parsed.developerMode = true;
+        developerModeMigrationApplied = true;
+      }
+      if (parsed.developerModeDebugWindowVersion !== SCRIPT_VERSION) {
+        parsed.developerMode = true;
+        parsed.developerModeDebugWindowVersion = SCRIPT_VERSION;
         developerModeMigrationApplied = true;
       }
       if (parsed.realtimeHints == null) parsed.realtimeHints = true;
@@ -227,7 +235,7 @@
   }
   function debugTag(d) {
     if (!d) return '';
-    // 只输出不可逆短标签，避免开发者日志带出患者姓名、申请单号或报告编号。
+    // 同时保留不可逆短标签用于聚合；完整字段仅在本机十分钟滚动调试记录中使用。
     const raw = [d.key, d.applicationNo, d.patient, d.applyTime, d.exam, d.modality].filter(Boolean).join('|');
     return raw ? `候选-${debugHash(raw)}` : '';
   }
@@ -239,6 +247,10 @@
   function debugCandidate(d, extra = {}) {
     return {
       tag: debugTag(d),
+      key: d?.key || '',
+      applicationNo: d?.applicationNo || '',
+      patient: d?.patient || '',
+      applyTime: d?.applyTime || '',
       status: norm(d?.status),
       statusCode: norm(d?.statusCode || d?.record?.reportStatusCode || d?.record?.checkStatusCode || d?.record?.statusCode),
       locked: !!(d?.locked || recordLockState(d?.record)),
@@ -248,7 +260,7 @@
       age: d?.age == null ? null : Number(d.age),
       gender: norm(d?.gender),
       applyAgeMinutes: debugApplyAgeMinutes(d),
-      hasRecordId: !!(d?.record?.repUid || d?.record?.reportUid || d?.record?.reportId || d?.record?.id),
+      recordId: d?.record?.repUid || d?.record?.reportUid || d?.record?.reportId || d?.record?.id || '',
       ...extra
     };
   }
@@ -256,19 +268,27 @@
     const text = String(error?.message || error || 'unknown');
     return text.replace(/\b\d{6,}\b/g, '[id]').slice(0, 160);
   }
+  function pruneDeveloperEvents(now = Date.now()) {
+    const cutoff = now - DEBUG_RETENTION_MS;
+    for (let i = debugEvents.length - 1; i >= 0; i--) {
+      const at = Date.parse(debugEvents[i]?.at || '');
+      if (!Number.isFinite(at) || at < cutoff) debugEvents.splice(i, 1);
+    }
+    while (debugEvents.length > DEBUG_EVENT_LIMIT) debugEvents.shift();
+  }
   function developerLog(event, detail = {}, options = {}) {
     if (!config.developerMode) return;
     const now = Date.now();
+    pruneDeveloperEvents(now);
     const key = `${event}|${detail.tag || ''}|${detail.reason || ''}`;
     if (!options.force && now - (debugLastAt.get(key) || 0) < DEBUG_EVENT_THROTTLE_MS) return;
     debugLastAt.set(key, now);
     const item = { at: new Date(now).toISOString(), event, ...detail };
     debugEvents.push(item);
-    while (debugEvents.length > DEBUG_EVENT_LIMIT) debugEvents.shift();
+    pruneDeveloperEvents(now);
     try { GM_setValue(DEBUG_STORAGE_KEY, debugEvents); } catch (_) {}
     // CUA/浏览器日志桥会把第二个对象参数折叠成“Object”，导致无法判断
-    // 候选究竟在哪一步被过滤、排队或拒绝。改为单个脱敏 JSON 字符串，
-    // 保留 tag、状态码、耗时和原因，同时不输出患者姓名或申请单号。
+    // 候选究竟在哪一步被过滤、排队或拒绝；直接输出完整调试对象，便于十分钟内复盘。
     console.info(`[自动诊断][开发者] ${JSON.stringify(item)}`);
   }
   function developerLogText() {
@@ -276,7 +296,7 @@
   }
   function developerModeStateText() {
     if (!config.developerMode) return '当前关闭';
-    return `${developerModeMigrationApplied ? '当前开启（临时排查）' : '当前开启'}（${debugEvents.length} 条）`;
+    return `${developerModeMigrationApplied ? '当前开启（已迁移）' : '当前开启'}（最近10分钟 ${debugEvents.length} 条）`;
   }
 
   // 页面偶尔会在姓名/机构之间插入不可见空白；统一清理后再做字段和账号匹配。
@@ -1698,7 +1718,7 @@
         <div style="display:flex;gap:6px;align-items:center;margin-bottom:9px"><select data-f="profile" style="flex:1;padding:5px"></select><button data-a="loadProfile">切换</button><input data-f="profileName" placeholder="方案名" style="width:90px;padding:5px"><button data-a="saveProfile">保存方案</button><button data-a="deleteProfile">删除</button></div>
         <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><label><input type="checkbox" data-f="enabled"> 启用自动打开</label><label>本地扫描 <input data-f="pollMs" type="number" min="1000" step="500" style="width:70px"> ms</label><label>状态探测 <input data-f="statusProbeMs" type="number" min="3000" step="1000" style="width:70px"> ms</label><label>列表补偿 <input data-f="listHeartbeatMs" type="number" min="10000" step="1000" style="width:80px"> ms</label><label>操作延迟 <input data-f="clickDelayMs" type="number" min="0" style="width:60px"> ms</label><label>进入方式 <select data-f="entryMode" style="width:auto"><option value="protocol-first">协议优先（失败回退点击）</option><option value="protocol-only">仅协议</option><option value="click">页面点击</option></select></label><label><input type="checkbox" data-f="pageQueryRefresh"> 允许脚本点击查询</label></div>
         <small style="display:block;color:#909399;margin:-3px 0 7px">候选发现优先使用 WebSocket、状态计数和只读列表协议；默认每个列表补偿周期同步一次当前筛选条件下的可见表格，不会修改报告状态复选框。</small>
-        <fieldset><legend>开发者模式</legend><div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap"><label class="jx-dev-toggle"><input type="checkbox" data-f="developerMode"> 开启开发者模式</label><button type="button" data-a="selfCheck">运行自检</button><button type="button" data-a="copyDebug">复制最近诊断记录</button><button type="button" data-a="clearDebug">清空记录</button><span data-a="debugState" style="color:#909399">当前关闭</span></div><small style="color:#909399">默认关闭。自检只读当前页面、登录会话和状态协议，不修改报告状态；诊断记录不记录患者姓名、申请单号、报告编号或认证信息。</small></fieldset>
+        <fieldset><legend>开发者模式</legend><div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap"><label class="jx-dev-toggle"><input type="checkbox" data-f="developerMode"> 开启开发者模式</label><button type="button" data-a="selfCheck">运行自检</button><button type="button" data-a="copyDebug">复制最近诊断记录</button><button type="button" data-a="clearDebug">清空记录</button><span data-a="debugState" style="color:#909399">当前开启（最近10分钟）</span></div><small style="color:#909399">默认开启并自动保留最近10分钟完整调试记录，便于定位候选未及时进入；超过10分钟自动删除。自检只读当前页面、登录会话和状态协议，不修改报告状态。记录不保存 Cookie、Authorization 或密码。</small></fieldset>
         <fieldset><legend>登录账号</legend><div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap"><span>当前账号：<b data-a="currentAccount">读取中</b></span><button type="button" data-a="useCurrentAccount">仅允许当前账号</button><button type="button" data-a="clearAccountLimit">清空限制</button></div><label>允许自动诊断的账号（留空不限）<input data-f="allowedAccounts" placeholder="可填账号编号或登录名，多个用逗号分隔"></label><small style="color:#909399">支持账号编号和登录名；留空时所有登录账号都启用。</small><div style="margin-top:8px;padding-top:7px;border-top:1px dashed #dcdfe6"><label><input type="checkbox" data-f="directLoginEnabled"> 未登录时启用协议登录</label><label>协议登录账号<input data-f="directLoginUsername" autocomplete="username" placeholder="账号编号"></label><label><input type="checkbox" data-f="directLoginOcrEnabled"> 使用本机 OCR 自动填写验证码</label><label>OCR 地址<input data-f="directLoginOcrEndpoint" value="http://127.0.0.1:18766/ocr" placeholder="http://127.0.0.1:18766/ocr"></label><div style="display:flex;gap:6px;margin-top:5px"><button type="button" data-a="directLoginNow">立即协议登录</button></div><small style="color:#909399">密码只在点击登录时临时输入，不写入配置。验证码优先使用本机 ddddocr，识别失败再显示手工输入。</small></div></fieldset>
         <fieldset><legend>报告/影像状态</legend><div class="jx-checks" data-group="reportStatuses"></div><div class="jx-checks" data-group="imageStatuses"></div></fieldset>
         <fieldset><legend>患者信息</legend><div class="jx-checks" data-group="encounterTypes"></div><div class="jx-checks" data-group="gender"></div><label class="jx-check"><input type="checkbox" data-f="ageUnlimited"> 年龄不限</label><div class="jx-grid"><label>年龄从<input data-f="ageMin" type="number"></label><label>年龄到<input data-f="ageMax" type="number"></label><label>姓名包含<input data-f="patientNameContains"></label><label>申请单号包含<input data-f="applicationNoContains"></label></div></fieldset>

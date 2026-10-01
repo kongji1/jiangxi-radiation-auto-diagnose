@@ -14,7 +14,7 @@ const publishTool = fs.readFileSync(path.join(root, 'tools', 'publish-github.ps1
 execFileSync(process.execPath, ['--check', sourcePath], { stdio: 'inherit' });
 
 const required = [
-  ['metadata version', /@version\s+0\.8\.35/],
+  ['metadata version', /@version\s+0\.8\.36/],
   ['login route', /\/api\/admin\/userLogin\/login/],
   ['read-only status probe', /\/api\/ct\/rays\/rep\/statusNum/],
   ['unfiltered status probe fallback', /radiationListPayload\(\{ pageSize: 1, ignoreStatusFilter: true, ignoreModalityFilter: true, ignoreInstitutionFilter: true, ignoreBodyPartFilter: true \}\)/],
@@ -49,6 +49,10 @@ const required = [
   ['recovery does not redirect', /redirected: false/],
   ['unlimited sentinel migration', /Older builds could persist[\s\S]+empty-array representation/],
   ['runtime filter snapshot', /配置门禁快照/],
+  ['developer rolling retention', /DEBUG_RETENTION_MS = 10 \* 60 \* 1000/],
+  ['full candidate debug fields', /applicationNo: d\?\.applicationNo[\s\S]+patient: d\?\.patient/],
+  ['developer event pruning', /pruneDeveloperEvents/],
+  ['developer mode upgrade migration', /developerModeDebugWindowVersion !== SCRIPT_VERSION/],
   ['direct login from radiation', /directLoginRoute = currentUrl\.pathname === '\/login' \|\| currentUrl\.pathname === '\/radiation'/],
   ['captcha OCR bridge', /recognizeCaptcha\(capJson\.data\.img\)/],
   ['captcha OCR fallback', /await recognizeCaptcha\(capJson\.data\.img\) \|\| await askCaptcha/],
@@ -95,9 +99,12 @@ if (!/def captcha_answer/.test(ocrServer) || !/fullmatch/.test(ocrServer) || !/1
 }
 
 const state = JSON.parse(fs.readFileSync(path.join(root, 'PROJECT_STATE.json'), 'utf8'));
-if (state.version !== '0.8.35') throw new Error(`PROJECT_STATE version mismatch: ${state.version}`);
+if (state.version !== '0.8.36') throw new Error(`PROJECT_STATE version mismatch: ${state.version}`);
 if (state.performance?.realtimeListMinCooldownMs !== 500) throw new Error('PROJECT_STATE realtime cooldown mismatch');
-if (!readme.includes('源码版本：`0.8.35`')) throw new Error('README version mismatch');
+if (state.performance?.developerModeDefault !== true) throw new Error('PROJECT_STATE developer mode default mismatch');
+if (state.performance?.developerDebugRetentionMs !== 600000) throw new Error('PROJECT_STATE developer retention mismatch');
+if (state.performance?.developerDebugFullCandidateFields !== true) throw new Error('PROJECT_STATE full debug fields mismatch');
+if (!readme.includes('源码版本：`0.8.36`')) throw new Error('README version mismatch');
 if (!readme.includes('127.0.0.1:18766')) throw new Error('README OCR endpoint missing');
 if (!readme.includes('GPT6_MAINTENANCE.md')) throw new Error('README GPT-6 guide missing');
 if (!gpt6Guide.includes('dispatchDelayMs') || !gpt6Guide.includes('diagnosisActive')) throw new Error('GPT-6 maintenance guide incomplete');
