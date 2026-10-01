@@ -13,7 +13,7 @@ const publishTool = fs.readFileSync(path.join(root, 'tools', 'publish-github.ps1
 execFileSync(process.execPath, ['--check', sourcePath], { stdio: 'inherit' });
 
 const required = [
-  ['metadata version', /@version\s+0\.8\.21/],
+  ['metadata version', /@version\s+0\.8\.24/],
   ['login route', /\/api\/admin\/userLogin\/login/],
   ['read-only status probe', /\/api\/ct\/rays\/rep\/statusNum/],
   ['read-only entry assertion', /assertAllowEnter/],
@@ -34,6 +34,7 @@ const required = [
   ['captcha OCR fallback', /await recognizeCaptcha\(capJson\.data\.img\) \|\| await askCaptcha/],
   ['direct login session probe', /sessionProbe = await fetch\('\/api\/admin\/user\/info'/],
   ['probe before password prompt', /sessionProbe\.ok && sessionPayload\?\.code === 200 && sessionPayload\.data[\s\S]+?directPassword = window\.prompt/],
+  ['active app shell login guard', /hasAuthenticatedAppShell\(\)[\s\S]+?跳过协议登录提示/],
   ['no password persistence', /directPassword = ''/],
   ['radiation route guard', /pathname !== '\/radiation'/],
   ['route cleanup', /stopRuntime\('route-exit'\)/],
@@ -59,8 +60,8 @@ if (!/def captcha_answer/.test(ocrServer) || !/fullmatch/.test(ocrServer) || !/1
 }
 
 const state = JSON.parse(fs.readFileSync(path.join(root, 'PROJECT_STATE.json'), 'utf8'));
-if (state.version !== '0.8.21') throw new Error(`PROJECT_STATE version mismatch: ${state.version}`);
-if (!readme.includes('源码版本：`0.8.21`')) throw new Error('README version mismatch');
+if (state.version !== '0.8.24') throw new Error(`PROJECT_STATE version mismatch: ${state.version}`);
+if (!readme.includes('源码版本：`0.8.24`')) throw new Error('README version mismatch');
 if (!readme.includes('127.0.0.1:18766')) throw new Error('README OCR endpoint missing');
 if (!/source-contract\.test\.mjs/.test(releaseTool) || !/captcha_ocr\.test\.py/.test(releaseTool)) throw new Error('release verification tool incomplete');
 if (!/git ls-remote/.test(publishTool) || !/git push origin/.test(publishTool) || !/raw\.githubusercontent\.com/.test(publishTool)) throw new Error('GitHub publish tool incomplete');

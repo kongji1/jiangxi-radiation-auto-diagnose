@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         江西省县域医共体 - 自动诊断候选
 // @namespace    local.jiangxi.radiation
-// @version      0.8.21
+// @version      0.8.24
 // @updateURL   https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @downloadURL https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @description  以页面实时推送为主、轻量协议探测为兜底，按可配置规则识别后优先通过系统协议进入诊断；支持可控开发者诊断日志。
@@ -242,10 +242,13 @@
     debugEvents.push(item);
     while (debugEvents.length > DEBUG_EVENT_LIMIT) debugEvents.shift();
     try { GM_setValue(DEBUG_STORAGE_KEY, debugEvents); } catch (_) {}
-    console.info('[自动诊断][开发者]', item);
+    // CUA/浏览器日志桥会把第二个对象参数折叠成“Object”，导致无法判断
+    // 候选究竟在哪一步被过滤、排队或拒绝。改为单个脱敏 JSON 字符串，
+    // 保留 tag、状态码、耗时和原因，同时不输出患者姓名或申请单号。
+    console.info(`[自动诊断][开发者] ${JSON.stringify(item)}`);
   }
   function developerLogText() {
-    return JSON.stringify({ version: '0.8.14', exportedAt: new Date().toISOString(), events: debugEvents }, null, 2);
+    return JSON.stringify({ version: '0.8.24', exportedAt: new Date().toISOString(), events: debugEvents }, null, 2);
   }
   function developerModeStateText() {
     if (!config.developerMode) return '当前关闭';
@@ -445,6 +448,18 @@
         sessionIdentity = { info: sessionPayload.data, uid: norm(sessionPayload.data.uid), loading: false, lastAttemptAt: Date.now(), loadedAt: Date.now() };
         return true;
       }
+      // 页面刚从门户跳转或刚完成刷新时，业务接口可能短暂返回 401/2002，
+      // 但前端已经恢复了用户工作台。此时弹出密码框会打断正常操作。
+      // 只读检查已渲染的用户头部；不向服务端写入任何内容，也不把它当作登录凭证。
+      // Vue 工作台在部分机器上会在 2~3 秒后才挂载用户头部；过早弹窗会
+      // 抢在工作台完成恢复前打断用户。把检查窗口延长到约 5 秒，仍然只读。
+      for (const delay of [0, 250, 800, 1600, 3000]) {
+        if (delay) await new Promise(resolve => setTimeout(resolve, delay));
+        if (hasAuthenticatedAppShell()) {
+          console.info('[自动诊断] 检测到已登录工作台，跳过协议登录提示');
+          return true;
+        }
+      }
       if (!directPassword) {
         directPassword = window.prompt('请输入协议登录密码（仅本次页面会话使用，不会保存）') || '';
         if (!directPassword) return false;
@@ -474,6 +489,23 @@
       console.warn('[自动诊断] 协议登录失败', String(e.message || e));
       return false;
     } finally { directLoginRunning = false; }
+  }
+  function hasAuthenticatedAppShell() {
+    if (!/^\/radiation(?:\/|$)/.test(location.pathname)) return false;
+    const selectors = [
+      '.user-wrap',
+      '.header-right .avatar-wrapper',
+      '[class*="user-wrap"]',
+      '[class*="avatar-wrapper"]'
+    ];
+    for (const selector of selectors) {
+      const node = document.querySelector(selector);
+      const text = norm(node?.innerText || node?.textContent);
+      if (node && text && !/(登录|未登录|请登录|login)/i.test(text)) return true;
+    }
+    // 低版本页面没有稳定的 class，但已渲染的工作台一定包含业务标题和菜单。
+    const bodyText = norm(document.body?.innerText || '');
+    return bodyText.includes('医学影像资源共享中心') && (bodyText.includes('诊断') || bodyText.includes('登记')) && !bodyText.includes('请输入协议登录密码');
   }
   function readCookie(name) {
     const prefix = `${encodeURIComponent(name)}=`;
@@ -1701,8 +1733,3 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bootstrap, { once: true });
   else bootstrap();
 })();
-
-
-
-
-
