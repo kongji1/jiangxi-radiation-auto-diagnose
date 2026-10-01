@@ -268,7 +268,6 @@
     if (loginCode && !headers['LOGIN-USER-KEY']) headers['LOGIN-USER-KEY'] = loginCode;
     const uid = norm(info?.uid);
     if (uid && !headers['LOGIN-USER-UID']) headers['LOGIN-USER-UID'] = uid;
-    if (uid && !headers['LOGIN-USER-UID']) headers['LOGIN-USER-UID'] = uid;
     if (clientIp && !headers['LOGIN-CLIENT-IP']) headers['LOGIN-CLIENT-IP'] = clientIp;
     // 与页面拦截器保持一致；不发送菜单/工作站等大字段，也不持久化用户信息。
     if (info && !info.admin && !headers['USER-INFO']) {
