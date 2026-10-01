@@ -1440,7 +1440,7 @@
         checks.push(`会话：${result.payload?.code === 200 ? '有效' : `业务码 ${result.payload?.code ?? '未知'}`}`);
       } catch (e) { checks.push(`会话：请求失败（${String(e.message || e).slice(0, 80)}）`); }
       try {
-        const result = await fetchJson('/api/ct/rays/rep/statusNum', { method: 'POST', credentials: 'include', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify(radiationListPayload({ pageSize: 1 })) }, 5000);
+        const result = await fetchJson('/api/ct/rays/rep/statusNum', { method: 'POST', credentials: 'include', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify(statusProbePayload()) }, 5000);
         checks.push(`状态协议：${result.payload?.code === 200 ? '可用' : `业务码 ${result.payload?.code ?? '未知'}`}`);
       } catch (e) { checks.push(`状态协议：请求失败（${String(e.message || e).slice(0, 80)}）`); }
     }

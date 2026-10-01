@@ -33,4 +33,12 @@ GitHub Actions 会在每次 push 和 pull request 上重复这两项检查。只
 3. 推送到主分支后等待 `Validate Tampermonkey script` 通过。
 4. Tampermonkey 检查到新版本后，再在实际业务页面确认脚本版本和运行日志。
 
+配置真实仓库地址时可运行：
+
+```powershell
+.\tools\configure-github-hot-update.ps1 -Repository kongji1/<仓库名>
+```
+
+该工具只写入 GitHub Raw 地址，不会提交或推送，也不会读取任何凭据。
+
 GitHub 推送只解决代码分发，不等同于业务页面已经加载新脚本；运行态仍需浏览器证据确认。
