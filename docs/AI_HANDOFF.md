@@ -13,7 +13,7 @@
 ### GPT-6 接管须知
 
 - 以主文件元数据、Git 提交和浏览器运行日志为三类独立证据；源码版本不等于 Tampermonkey 已加载版本。
-- 当前源码版本为 `0.8.38`，最新提交为当前配置快照升级提交。0.8.34 将 WebSocket 列表调度窗口压到 250ms，并记录 `dispatchDelayMs`/`withinOneSecond`；0.8.35 规范化“不限”配置并在 TOKEN_FAIL 后使用受控页面查询兜底；0.8.36 将开发者记录改为默认开启并保留最近 10 分钟完整候选字段；0.8.37 增加认证上下文形状诊断；0.8.38 在启动事件中保存实际选中的过滤值，能直接解释某条记录为何被规则拦截。`diagnosisActive` 只防止诊断中再次进入其它客户，不暂停列表刷新、状态探测或 WebSocket 观察。若列表中没有带诊断医生姓名的“诊断中”记录，入口锁会自动释放。设置面板现已补齐检查医院、检查部位、诊断医生和审核时间筛选，并可通过“更新所有可选项目”缓存动态选项；自检会比较本地版本与 GitHub Raw 版本并提示是否同步。CI 还覆盖发布失败保护测试。
+- 当前源码版本为 `0.8.38`，最新提交为 `a06738b`。0.8.34 将 WebSocket 列表调度窗口压到 250ms，并记录 `dispatchDelayMs`/`withinOneSecond`；0.8.35 规范化“不限”配置并在 TOKEN_FAIL 后使用受控页面查询兜底；0.8.36 将开发者记录改为默认开启并保留最近 10 分钟完整候选字段；0.8.37 增加认证上下文形状诊断；0.8.38 在启动事件中保存实际选中的过滤值，能直接解释某条记录为何被规则拦截。`diagnosisActive` 只防止诊断中再次进入其它客户，不暂停列表刷新、状态探测或 WebSocket 观察。若列表中没有带诊断医生姓名的“诊断中”记录，入口锁会自动释放。设置面板现已补齐检查医院、检查部位、诊断医生和审核时间筛选，并可通过“更新所有可选项目”缓存动态选项；自检会比较本地版本与 GitHub Raw 版本并提示是否同步。CI 还覆盖发布失败保护测试。
 - WebSocket 有报告编号但状态字段为空时，允许调用 `assertAllowEnter`，由服务端决定是否仍是可进入的待诊断记录；没有报告编号才走列表兜底。
 - 服务端 `statusNum` 或窄列表返回业务码 2002 时，不能循环高频重试；状态探测使用无筛选全局计数，列表回退使用最近列表并在客户端过滤。
 - “当前报告已被其他用户锁定”、诊断中、待审核、审核中、已审核和已打印记录必须跳过；不要为了提高命中率放宽这一门禁。
@@ -178,4 +178,5 @@
 - The bridge is installed in the ignored `.captcha-ocr-venv` environment from `tools/requirements-captcha-ocr.txt` and runs on `127.0.0.1:18766`; `8766` is reserved by the existing OAuth proxy. Start it with `tools/start-captcha-ocr.ps1` and verify `GET /health` before testing login. The service is loopback-only and does not log images or answers.
 - 0.8.34 also rate-limits TOKEN_FAIL recovery to one session-identity refresh per 15 seconds and throttles the corresponding developer event to the same interval. The `/radiation` route protection and single retry remain unchanged; this reduces duplicate recovery traffic when `statusNum` repeatedly returns 2002.
 - Direct-login bootstrap now probes `/api/admin/user/info` before prompting for a password. This handles HttpOnly or delayed `Auth` cookies: an already logged-in page returns through the existing session and never shows the protocol-password dialog on refresh.
+
 
