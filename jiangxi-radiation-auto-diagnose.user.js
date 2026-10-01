@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         江西省县域医共体 - 自动诊断候选
 // @namespace    local.jiangxi.radiation
-// @version      0.8.28
+// @version      0.8.29
 // @updateURL   https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @downloadURL https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @description  以页面实时推送为主、轻量协议探测为兜底，按可配置规则识别后优先通过系统协议进入诊断；支持可控开发者诊断日志。
@@ -106,6 +106,7 @@
   let lastRealtimeHintAt = 0;
   // WebSocket 提示可能先于列表请求完成；保存最近一条可识别线索，避免并发请求时丢失。
   let queuedRealtimeMatch = null;
+  let queuedRealtimeHintAt = 0;
   // 页面 Axios 还会发送登录用户 UID/USER-INFO；按需读取一次当前会话，值只留在内存中。
   let sessionIdentity = { info: null, uid: '', loading: false, lastAttemptAt: 0, loadedAt: 0 };
   let sessionIdentityRequest = null;
@@ -250,7 +251,7 @@
     console.info(`[自动诊断][开发者] ${JSON.stringify(item)}`);
   }
   function developerLogText() {
-    return JSON.stringify({ version: '0.8.28', exportedAt: new Date().toISOString(), events: debugEvents }, null, 2);
+    return JSON.stringify({ version: '0.8.29', exportedAt: new Date().toISOString(), events: debugEvents }, null, 2);
   }
   function developerModeStateText() {
     if (!config.developerMode) return '当前关闭';
@@ -1155,6 +1156,13 @@
     listRefreshRunning = true;
     lastListFetchAt = now;
     try {
+      if (options.hintAt) {
+        developerLog('实时列表请求发起', {
+          source: options.reason || 'list',
+          dispatchDelayMs: Math.max(0, now - Number(options.hintAt) || 0),
+          withinOneSecond: now - Number(options.hintAt) <= 1000
+        });
+      }
       // 有精确线索时缩小请求范围；没有线索才取常规的最近列表。
       const records = await fetchRadiationRecords({ match, pageSize: match ? 20 : 30, timeoutMs: 5000, reason: options.reason || 'list' });
       return await processRemoteRecords(records);
@@ -1220,6 +1228,7 @@
     if (diagnosisActive || !config.enabled || config.entryMode === 'click' || !config.realtimeHints || pageWindow().location.pathname !== '/radiation') return;
     if (!accountAllowed()) return;
     if (options.match && typeof options.match === 'object') queuedRealtimeMatch = options.match;
+    if (options.hintAt) queuedRealtimeHintAt = Number(options.hintAt) || queuedRealtimeHintAt;
     if (realtimeRefreshTimer) return;
     // 同一条 WebSocket 线索只保留极短的合并窗口；正常情况下请求应在 1 秒内发出。
     const minGap = 250;
@@ -1230,13 +1239,15 @@
       lastRealtimeRefreshAt = Date.now();
       const match = queuedRealtimeMatch;
       queuedRealtimeMatch = null;
-      await refreshRemoteCandidates({ force: true, reason: 'websocket-hint', match });
+      const hintAt = queuedRealtimeHintAt;
+      queuedRealtimeHintAt = 0;
+      await refreshRemoteCandidates({ force: true, reason: 'websocket-hint', match, hintAt });
       // 请求重叠或冷却保护时，refreshRemoteCandidates 会把线索放回队列；稍后重试，
       // 既不丢实时事件，也不把列表接口变成高频轮询。
       if (queuedRealtimeMatch) {
         const pending = queuedRealtimeMatch;
         queuedRealtimeMatch = null;
-        setTimeout(() => queueRealtimeRefresh({ match: pending }), 500);
+        setTimeout(() => queueRealtimeRefresh({ match: pending, hintAt }), 500);
       }
     }, delay);
   }
@@ -1245,7 +1256,7 @@
     if (diagnosisActive || !config.enabled || config.entryMode === 'click' || !config.realtimeHints || pageWindow().location.pathname !== '/radiation') return;
     if (!accountAllowed()) return;
     if (!hint || typeof hint !== 'object') {
-      queueRealtimeRefresh();
+      queueRealtimeRefresh({ hintAt: Date.now() });
       return;
     }
     lastRealtimeHintAt = Date.now();
@@ -1258,7 +1269,7 @@
     developerLog('实时推送收到', { ...debugCandidate(d), source: 'websocket', hasIdentity, hasRecordId: !!recordId });
     if (!hasIdentity) {
       developerLog('实时推送降级', { source: 'websocket', reason: '线索字段不足' });
-      queueRealtimeRefresh();
+      queueRealtimeRefresh({ hintAt: lastRealtimeHintAt });
       return;
     }
     let entered = false;
@@ -1292,7 +1303,7 @@
     }
     // 推送消息没有完整记录或协议进入失败时，按该条线索取一次窄列表，
     // 不再从第一页的全量候选中盲目扫描。
-    if (!entered) queueRealtimeRefresh({ match: d });
+    if (!entered) queueRealtimeRefresh({ match: d, hintAt: lastRealtimeHintAt });
     else developerLog('实时推送进入成功', { ...debugCandidate(d), source: 'websocket' });
   }
 
@@ -1512,6 +1523,7 @@
     statusProbeFailures = 0;
     lastRealtimeHintAt = 0;
     queuedRealtimeMatch = null;
+    queuedRealtimeHintAt = 0;
     // 先以当前页面表格为基线，避免打开脚本时因为“不限时间”一次性抢走旧记录。
     lastListFetchAt = Date.now();
     lastRealtimeRefreshAt = 0;

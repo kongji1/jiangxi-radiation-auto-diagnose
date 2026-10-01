@@ -1,14 +1,14 @@
 {
   "project": "江西省县域医共体 - 自动诊断候选",
   "source": "jiangxi-radiation-auto-diagnose.user.js",
-  "version": "0.8.28",
+  "version": "0.8.29",
   "snapshotDate": "2026-10-01",
   "sourceOfTruth": "jiangxi-radiation-auto-diagnose.user.js",
   "handoff": "docs/AI_HANDOFF.md",
   "protocol": "docs/PROTOCOL.md",
   "verification": "docs/VERIFICATION.md",
   "tampermonkeyLoadedVersion": "not independently confirmed; browser storage exposes directLogin OCR fields but not the metadata version",
-  "liveVerification": "Source contract, syntax, and arithmetic CAPTCHA bridge tests pass for 0.8.28. A live refresh reproduced a native protocol-password prompt while the rendered page already showed the logged-in user and remained /radiation; 0.8.28 adds a read-only app-shell guard to suppress that false prompt. Repeated statusNum code=2002 still records 会话自愈保持当前页 with redirected:false. Real OCR recognition and protocol login remain unverified.",
+  "liveVerification": "Source contract, syntax, and arithmetic CAPTCHA bridge tests pass for 0.8.29. A live refresh reproduced a native protocol-password prompt while the rendered page already showed the logged-in user and remained /radiation; 0.8.29 adds a read-only app-shell guard to suppress that false prompt. Repeated statusNum code=2002 still records 会话自愈保持当前页 with redirected:false. Real OCR recognition and protocol login remain unverified.",
   "performance": {
     "localScanMs": 2000,
     "statusProbeMs": 5000,
@@ -55,7 +55,7 @@
     ]
   },
   "nextActions": [
-    "在 Tampermonkey 中加载 0.8.28 并确认脚本版本",
+    "在 Tampermonkey 中加载 0.8.29 并确认脚本版本",
     "登录会话验证协议列表和 WebSocket 实时字段",
     "用有结论/无结论、不同检查项目和申请机构记录验证排序",
     "用年龄不限和年龄范围分别做边界反向测试",
