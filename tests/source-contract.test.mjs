@@ -10,7 +10,7 @@ const updateTool = fs.readFileSync(path.join(root, 'tools', 'configure-github-ho
 execFileSync(process.execPath, ['--check', sourcePath], { stdio: 'inherit' });
 
 const required = [
-  ['metadata version', /@version\s+0\.8\.20/],
+  ['metadata version', /@version\s+0\.8\.21/],
   ['login route', /\/api\/admin\/userLogin\/login/],
   ['read-only status probe', /\/api\/ct\/rays\/rep\/statusNum/],
   ['read-only entry assertion', /assertAllowEnter/],
@@ -26,6 +26,8 @@ const required = [
   ['in-page token recovery', /会话自愈保持当前页/],
   ['recovery does not redirect', /redirected: false/],
   ['direct login from radiation', /directLoginRoute = currentUrl\.pathname === '\/login' \|\| currentUrl\.pathname === '\/radiation'/],
+  ['captcha OCR bridge', /recognizeCaptcha\(capJson\.data\.img\)/],
+  ['captcha OCR fallback', /await recognizeCaptcha\(capJson\.data\.img\) \|\| await askCaptcha/],
   ['no password persistence', /directPassword = ''/],
   ['radiation route guard', /pathname !== '\/radiation'/],
   ['route cleanup', /stopRuntime\('route-exit'\)/],
@@ -45,8 +47,12 @@ const hotUpdateHelper = fs.readFileSync(path.join(root, 'tools', 'configure-gith
 if (!/readFileSync\(sourcePath, 'utf8'\)/.test(hotUpdateHelper) || !/writeFileSync\(sourcePath, source/.test(hotUpdateHelper)) {
   throw new Error('GitHub hot-update helper must use explicit UTF-8 Node I/O');
 }
+const ocrServer = fs.readFileSync(path.join(root, 'tools', 'captcha_ocr_server.py'), 'utf8');
+if (!/def captcha_answer/.test(ocrServer) || !/fullmatch/.test(ocrServer) || !/127\.0\.0\.1/.test(ocrServer)) {
+  throw new Error('CAPTCHA OCR bridge must safely evaluate arithmetic challenges on loopback only');
+}
 
 const state = JSON.parse(fs.readFileSync(path.join(root, 'PROJECT_STATE.json'), 'utf8'));
-if (state.version !== '0.8.20') throw new Error(`PROJECT_STATE version mismatch: ${state.version}`);
+if (state.version !== '0.8.21') throw new Error(`PROJECT_STATE version mismatch: ${state.version}`);
 
 console.log(`source-contract: passed ${required.length} checks; version=${state.version}`);

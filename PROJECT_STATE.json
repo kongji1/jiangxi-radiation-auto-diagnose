@@ -1,14 +1,14 @@
 {
   "project": "江西省县域医共体 - 自动诊断候选",
   "source": "jiangxi-radiation-auto-diagnose.user.js",
-  "version": "0.8.20",
+  "version": "0.8.21",
   "snapshotDate": "2026-10-01",
   "sourceOfTruth": "jiangxi-radiation-auto-diagnose.user.js",
   "handoff": "docs/AI_HANDOFF.md",
   "protocol": "docs/PROTOCOL.md",
   "verification": "docs/VERIFICATION.md",
-  "tampermonkeyLoadedVersion": "unknown; previously observed 0.5.0 before this project move",
-  "liveVerification": "Source contract and syntax tests pass for 0.8.18; browser storage diagnostics reproduced TOKEN_FAIL -> /login -> /setting/profile, and the recovery guard now requires a configured login username before redirecting. Browser verification after installing the fix and remote repository publication remain to be verified.",
+  "tampermonkeyLoadedVersion": "0.8.19 observed in local Edge storage; 0.8.21 source is not yet confirmed loaded",
+  "liveVerification": "Source contract, syntax, and arithmetic CAPTCHA bridge tests pass for 0.8.21. Browser storage diagnostics confirmed the old TOKEN_FAIL -> /login -> /setting/profile sequence; 0.8.19 keeps the /radiation route. The new local OCR bridge supports arithmetic protocol CAPTCHAs and four-digit portal CAPTCHAs, but a real login retry and Tampermonkey 0.8.21 load still need browser verification.",
   "performance": {
     "localScanMs": 2000,
     "statusProbeMs": 5000,
@@ -54,12 +54,13 @@
     ]
   },
   "nextActions": [
-    "在 Tampermonkey 中加载 0.8.18 并确认脚本版本",
+    "在 Tampermonkey 中加载 0.8.21 并确认脚本版本",
     "登录会话验证协议列表和 WebSocket 实时字段",
     "用有结论/无结论、不同检查项目和申请机构记录验证排序",
     "用年龄不限和年龄范围分别做边界反向测试",
     "触发一次 TOKEN_FAIL，观察单次恢复和直接登录自愈",
     "开发者模式下观察离开 /radiation 后的路由变化记录，确认 /setting/profile 跳转来源",
+    "安装独立 OCR 运行环境并启动 127.0.0.1:18766，随后用算式验证码完成一次真实协议登录",
     "确定 GitHub 仓库后推送并配置 @updateURL/@downloadURL"
   ],
   "projectRules": "AGENTS.md"

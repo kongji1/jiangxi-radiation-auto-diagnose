@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         江西省县域医共体 - 自动诊断候选
 // @namespace    local.jiangxi.radiation
-// @version      0.8.20
+// @version      0.8.21
 // @updateURL   https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @downloadURL https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @description  以页面实时推送为主、轻量协议探测为兜底，按可配置规则识别后优先通过系统协议进入诊断；支持可控开发者诊断日志。
@@ -11,6 +11,8 @@
 // @grant        GM_registerMenuCommand
 // @grant        GM_getValue
 // @grant        GM_setValue
+// @grant        GM_xmlhttpRequest
+// @connect      127.0.0.1
 // @grant        unsafeWindow
 // ==/UserScript==
 
@@ -26,7 +28,7 @@
     // [] 表示不限登录账号；填写账号编号或登录名后，仅对匹配账号启用自动诊断。
     allowedAccounts: [],
     // 协议登录只保存账号，不保存密码；密码仅在当前页面会话内存中使用。
-    directLogin: { enabled: false, username: '' },
+    directLogin: { enabled: false, username: '', ocrEnabled: true, ocrEndpoint: 'http://127.0.0.1:18766/ocr' },
     // DOM 扫描只在本地进行；服务器探测单独使用 statusNum，前台默认 5 秒一次，后台自动降到较低频率并带退避。
     pollMs: 2000,
     statusProbeMs: 5000,
@@ -376,6 +378,37 @@
     return w.RSAUtils.encryptedString(pair, encodeURIComponent(password));
   }
 
+  async function recognizeCaptcha(imageBase64) {
+    const dl = directLoginConfig();
+    if (dl.ocrEnabled === false || !dl.ocrEndpoint || !imageBase64) return '';
+    const body = JSON.stringify({ imageBase64 });
+    try {
+      const result = await new Promise((resolve, reject) => {
+        if (typeof GM_xmlhttpRequest === 'function') {
+          GM_xmlhttpRequest({
+            method: 'POST', url: dl.ocrEndpoint, data: body,
+            headers: { 'Content-Type': 'application/json' }, timeout: 2500,
+            onload: response => resolve(response), ontimeout: () => reject(new Error('OCR 超时')),
+            onerror: () => reject(new Error('OCR 服务不可用'))
+          });
+        } else {
+          fetch(dl.ocrEndpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })
+            .then(response => response.text().then(text => ({ status: response.status, responseText: text })))
+            .then(resolve, reject);
+        }
+      });
+      const payload = JSON.parse(result.responseText || '{}');
+      const code = String(payload.code || '').replace(/\D/g, '');
+      if (payload.ok === true && /^\d{1,4}$/.test(code)) {
+        developerLog('验证码自动识别成功', { source: 'local-ocr', digits: 4 });
+        return code;
+      }
+    } catch (e) {
+      developerLog('验证码自动识别不可用', { source: 'local-ocr', reason: String(e.message || e).slice(0, 60) });
+    }
+    return '';
+  }
+
   function askCaptcha(imageBase64) {
     return new Promise(resolve => {
       const old = document.getElementById('jx-direct-login-captcha'); if (old) old.remove();
@@ -406,7 +439,8 @@
       const capRes = await fetch('/api/admin/userLogin/captcha', { credentials: 'include', headers: { Accept: 'application/json' } });
       const capJson = await capRes.json();
       if (keyJson.code !== 200 || capJson.code !== 200 || !capJson.data?.img || !capJson.data?.uuid) throw new Error('登录参数获取失败');
-      const code = await askCaptcha(capJson.data.img);
+      // 优先调用本机 ddddocr 桥自动识别；桥不可用或识别失败时保留手工输入。
+      const code = await recognizeCaptcha(capJson.data.img) || await askCaptcha(capJson.data.img);
       if (!code) return false;
       const params = new URLSearchParams({ username: dl.username, password: rsaPassword(directPassword, keyJson.data), code, uuid: capJson.data.uuid });
       const loginRes = await fetch(`/api/admin/userLogin/login?${params.toString()}`, { method: 'POST', credentials: 'include', headers: { Accept: 'application/json' } });
@@ -1478,7 +1512,7 @@
         <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><label><input type="checkbox" data-f="enabled"> 启用自动打开</label><label>本地扫描 <input data-f="pollMs" type="number" min="1000" step="500" style="width:70px"> ms</label><label>状态探测 <input data-f="statusProbeMs" type="number" min="3000" step="1000" style="width:70px"> ms</label><label>列表补偿 <input data-f="listHeartbeatMs" type="number" min="10000" step="1000" style="width:80px"> ms</label><label>操作延迟 <input data-f="clickDelayMs" type="number" min="0" style="width:60px"> ms</label><label>进入方式 <select data-f="entryMode" style="width:auto"><option value="protocol-first">协议优先（失败回退点击）</option><option value="protocol-only">仅协议</option><option value="click">页面点击</option></select></label><label><input type="checkbox" data-f="pageQueryRefresh"> 允许脚本点击查询</label></div>
         <small style="display:block;color:#909399;margin:-3px 0 7px">候选发现优先使用 WebSocket、状态计数和只读列表协议；默认每个列表补偿周期同步一次当前筛选条件下的可见表格，不会修改报告状态复选框。</small>
         <fieldset><legend>开发者模式</legend><div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap"><label class="jx-dev-toggle"><input type="checkbox" data-f="developerMode"> 开启开发者模式</label><button type="button" data-a="selfCheck">运行自检</button><button type="button" data-a="copyDebug">复制最近诊断记录</button><button type="button" data-a="clearDebug">清空记录</button><span data-a="debugState" style="color:#909399">当前关闭</span></div><small style="color:#909399">默认关闭。自检只读当前页面、登录会话和状态协议，不修改报告状态；诊断记录不记录患者姓名、申请单号、报告编号或认证信息。</small></fieldset>
-        <fieldset><legend>登录账号</legend><div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap"><span>当前账号：<b data-a="currentAccount">读取中</b></span><button type="button" data-a="useCurrentAccount">仅允许当前账号</button><button type="button" data-a="clearAccountLimit">清空限制</button></div><label>允许自动诊断的账号（留空不限）<input data-f="allowedAccounts" placeholder="可填账号编号或登录名，多个用逗号分隔"></label><small style="color:#909399">支持账号编号和登录名，例如账号编号或登录名；留空时所有登录账号都启用。</small><div style="margin-top:8px;padding-top:7px;border-top:1px dashed #dcdfe6"><label><input type="checkbox" data-f="directLoginEnabled"> 未登录时启用协议登录</label><label>协议登录账号<input data-f="directLoginUsername" autocomplete="username" placeholder="账号编号"></label><div style="display:flex;gap:6px;margin-top:5px"><button type="button" data-a="directLoginNow">立即协议登录</button></div><small style="color:#909399">密码只在点击登录时临时输入，不写入配置。验证码显示在弹窗中，直接点击完成。</small></div></fieldset>
+        <fieldset><legend>登录账号</legend><div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap"><span>当前账号：<b data-a="currentAccount">读取中</b></span><button type="button" data-a="useCurrentAccount">仅允许当前账号</button><button type="button" data-a="clearAccountLimit">清空限制</button></div><label>允许自动诊断的账号（留空不限）<input data-f="allowedAccounts" placeholder="可填账号编号或登录名，多个用逗号分隔"></label><small style="color:#909399">支持账号编号和登录名；留空时所有登录账号都启用。</small><div style="margin-top:8px;padding-top:7px;border-top:1px dashed #dcdfe6"><label><input type="checkbox" data-f="directLoginEnabled"> 未登录时启用协议登录</label><label>协议登录账号<input data-f="directLoginUsername" autocomplete="username" placeholder="账号编号"></label><label><input type="checkbox" data-f="directLoginOcrEnabled"> 使用本机 OCR 自动填写验证码</label><label>OCR 地址<input data-f="directLoginOcrEndpoint" value="http://127.0.0.1:18766/ocr" placeholder="http://127.0.0.1:18766/ocr"></label><div style="display:flex;gap:6px;margin-top:5px"><button type="button" data-a="directLoginNow">立即协议登录</button></div><small style="color:#909399">密码只在点击登录时临时输入，不写入配置。验证码优先使用本机 ddddocr，识别失败再显示手工输入。</small></div></fieldset>
         <fieldset><legend>报告/影像状态</legend><div class="jx-checks" data-group="reportStatuses"></div><div class="jx-checks" data-group="imageStatuses"></div></fieldset>
         <fieldset><legend>患者信息</legend><div class="jx-checks" data-group="encounterTypes"></div><div class="jx-checks" data-group="gender"></div><label class="jx-check"><input type="checkbox" data-f="ageUnlimited"> 年龄不限</label><div class="jx-grid"><label>年龄从<input data-f="ageMin" type="number"></label><label>年龄到<input data-f="ageMax" type="number"></label><label>姓名包含<input data-f="patientNameContains"></label><label>申请单号包含<input data-f="applicationNoContains"></label></div></fieldset>
         <fieldset><legend>检查与机构</legend><div class="jx-checks" data-group="modalities"></div><div class="jx-checks" data-group="applyInstitution"></div><div class="jx-checks" data-group="examNames"></div><div class="jx-exam-head"><span>其他检查项目</span><button type="button" data-a="refreshExamOptions" title="从当前列表更新全部可勾选项目">更新所有可选项目</button></div><div class="jx-checks" data-group="examNamesExtra"></div><small style="color:#909399">检查项目勾选“不限”即可匹配全部项目；权重越大越优先，格式为“项目=权重”，每行一项。</small><label>检查项目权重<textarea data-f="examWeights" rows="4" placeholder="头颅平扫=100&#10;肋骨平扫=10"></textarea></label><label>申请机构权重<textarea data-f="institutionWeights" rows="3" placeholder="机构名称=权重"></textarea></label><label class="jx-check"><input type="checkbox" data-f="preliminaryReportFirst"> 有结论的初写报告优先</label><small style="color:#909399">只识别结论字段；描述、备注不会被当作结论。没有结论的记录仍可处理，只是排序靠后。</small><div class="jx-grid"><label>检查部位最少数量<select data-f="siteMin"><option value="">不限</option><option value="1">1 个</option><option value="2">2 个</option><option value="3">3 个</option><option value="4">4 个</option><option value="5">5 个</option></select></label><label>检查部位最多数量<select data-f="siteMax"><option value="">不限</option><option value="1">1 个</option><option value="2">2 个</option><option value="3">3 个</option><option value="4">4 个</option><option value="5">5 个</option></select></label></div><label>审核/诊断医生（留空不限）<input data-f="auditDoctors"></label></fieldset>
@@ -1525,7 +1559,7 @@
       const debugState = box.querySelector('[data-a="debugState"]'); if (debugState) debugState.textContent = developerModeStateText();
       const currentAccount = box.querySelector('[data-a="currentAccount"]'); if (currentAccount) currentAccount.textContent = accountDisplay();
       f('allowedAccounts').value = listValue(config.allowedAccounts);
-      f('directLoginEnabled').checked = !!directLoginConfig().enabled; f('directLoginUsername').value = directLoginConfig().username || '';
+      f('directLoginEnabled').checked = !!directLoginConfig().enabled; f('directLoginUsername').value = directLoginConfig().username || ''; f('directLoginOcrEnabled').checked = directLoginConfig().ocrEnabled !== false; f('directLoginOcrEndpoint').value = directLoginConfig().ocrEndpoint || 'http://127.0.0.1:18766/ocr';
       f('entryMode').value = config.entryMode || 'protocol-first';
       for (const n of ['reportStatuses','imageStatuses','encounterTypes','gender','modalities','examNames','examNamesExtra']) setGroup(n, config[n]);
       setGroup('applyInstitution', config.applyInstitution);
@@ -1540,7 +1574,7 @@
     function read() {
       config.enabled = f('enabled').checked; config.developerMode = f('developerMode').checked; config.pageQueryRefresh = f('pageQueryRefresh').checked; config.pollMs = Math.max(1000, Number(f('pollMs').value) || 2000); config.statusProbeMs = Math.max(3000, Number(f('statusProbeMs').value) || 5000); config.listHeartbeatMs = Math.max(10000, Number(f('listHeartbeatMs').value) || 15000); config.clickDelayMs = Number(f('clickDelayMs').value) || 0; config.entryMode = f('entryMode').value || 'protocol-first';
       config.allowedAccounts = parseList(f('allowedAccounts').value);
-      config.directLogin = { enabled: f('directLoginEnabled').checked, username: f('directLoginUsername').value.trim() };
+      config.directLogin = { enabled: f('directLoginEnabled').checked, username: f('directLoginUsername').value.trim(), ocrEnabled: f('directLoginOcrEnabled').checked, ocrEndpoint: f('directLoginOcrEndpoint').value.trim() || 'http://127.0.0.1:18766/ocr' };
       for (const n of ['reportStatuses','imageStatuses','encounterTypes','gender','modalities','examNames','examNamesExtra']) config[n] = getGroup(n);
       config.applyInstitution = getGroup('applyInstitution'); config.auditDoctors = parseList(f('auditDoctors').value);
       config.age.unlimited = f('ageUnlimited').checked; config.age.min = config.age.unlimited || f('ageMin').value === '' ? null : Number(f('ageMin').value); config.age.max = config.age.unlimited || f('ageMax').value === '' ? null : Number(f('ageMax').value); config.patientNameContains = f('patientNameContains').value.trim(); config.applicationNoContains = f('applicationNoContains').value.trim(); config.examWeights = parseList(f('examWeights').value.replace(/\n/g, ',')); config.institutionWeights = parseList(f('institutionWeights').value.replace(/\n/g, ',')); config.preliminaryReportFirst = f('preliminaryReportFirst').checked; config.examSiteCount = { min: f('siteMin').value === '' ? null : Number(f('siteMin').value), max: f('siteMax').value === '' ? null : Number(f('siteMax').value) };
