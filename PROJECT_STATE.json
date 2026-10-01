@@ -29,7 +29,7 @@
     "accountGateAllEntrypoints": true,
     "logsRedacted": true,
     "normalListMinCooldownMs": 10000,
-    "realtimeListMinCooldownMs": 3000,
+    "realtimeListMinCooldownMs": 500,
     "failureBackoffMaxMs": 60000,
     "tokenRecoveryCooldownMs": 15000,
     "developerModeDefault": false,
@@ -60,7 +60,7 @@
     "用有结论/无结论、不同检查项目和申请机构记录验证排序",
     "用年龄不限和年龄范围分别做边界反向测试",
     "触发一次 TOKEN_FAIL，观察单次恢复和直接登录自愈",
-    "开发者模式下观察离开 /radiation 后的路由变化记录，确认 /setting/profile 跳转来源",
+    "开发者模式下观察诊断锁释放记录，确认右侧列表持续刷新且无诊断医生姓名时允许下一位进入",
     "安装独立 OCR 运行环境并启动 127.0.0.1:18766，随后用算式验证码完成一次真实协议登录",
     "确定 GitHub 仓库后推送并配置 @updateURL/@downloadURL"
   ],
