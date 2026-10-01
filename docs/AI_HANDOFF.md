@@ -147,4 +147,4 @@
 
 - The source does not contain a `/setting/profile` navigation target. 0.8.18 now records route changes in developer mode and stops all timers, observers, and candidate processing as soon as the page leaves `/radiation`.
 - Header settings integration is restricted to known table-column controls. Broad `title`/`aria-label` matching was removed so unrelated profile/navigation controls cannot receive the settings handler.
-- The GitHub hot-update helper now uses explicit UTF-8 reads/writes and refuses to overwrite the userscript when the source cannot be read. Do not run an older copy of the helper against the Chinese userscript.
+- The GitHub hot-update helper now delegates source editing to `tools/configure-github-hot-update.mjs`, which uses explicit UTF-8 reads/writes and refuses to overwrite the userscript when metadata cannot be read. The PowerShell wrapper only locates Node and passes the repository/branch arguments. Do not run an older copy of the helper against the Chinese userscript.
