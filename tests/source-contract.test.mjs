@@ -25,6 +25,7 @@ const required = [
   ['selector self-healing', /queryBodyRows/],
   ['interactive self-check', /runSelfCheck/],
   ['TOKEN_FAIL recovery', /__tokenRecoveryRetry/],
+  ['TOKEN_FAIL recovery cooldown', /tokenRecoveryLastAt.*15000/],
   ['in-page token recovery', /会话自愈保持当前页/],
   ['recovery does not redirect', /redirected: false/],
   ['direct login from radiation', /directLoginRoute = currentUrl\.pathname === '\/login' \|\| currentUrl\.pathname === '\/radiation'/],

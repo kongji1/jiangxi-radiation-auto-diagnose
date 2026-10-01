@@ -31,6 +31,7 @@
     "normalListMinCooldownMs": 10000,
     "realtimeListMinCooldownMs": 3000,
     "failureBackoffMaxMs": 60000,
+    "tokenRecoveryCooldownMs": 15000,
     "developerModeDefault": false,
     "developerModeTemporaryMigration": true,
     "developerDebugEventLimit": 240,

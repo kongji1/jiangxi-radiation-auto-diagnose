@@ -112,6 +112,8 @@
   // 业务前端会从 WebRTC ICE 候选中附带客户端地址；缺少该头时只读接口会返回 TOKEN_FAIL(2002)。
   let clientIp = '';
   let clientIpRequest = null;
+  let tokenRecoveryLastAt = 0;
+  let tokenFailureLoggedAt = 0;
   let pageQueryRunning = false;
   let lastPageQueryAt = 0;
   // statusNum/WS 均不可用时，低频复用页面原生查询作为兜底。
@@ -351,7 +353,8 @@
     const result = await run(options);
     // TOKEN_FAIL 常见于页面从门户跳转后旧的用户头已失效；只在明确的 2002
     // 返回时刷新一次会话身份并重试，避免把正常请求变成双倍流量。
-    if (result.payload?.code === 2002 && !options.__tokenRecoveryRetry) {
+    if (result.payload?.code === 2002 && !options.__tokenRecoveryRetry && Date.now() - tokenRecoveryLastAt >= 15000) {
+      tokenRecoveryLastAt = Date.now();
       sessionIdentity = { info: null, uid: '', loading: false, lastAttemptAt: 0, loadedAt: 0 };
       await ensureSessionIdentity();
       return run({ ...options, __tokenRecoveryRetry: true });
@@ -360,7 +363,10 @@
       // 已经在影像列表页时，TOKEN_FAIL 只代表当前协议请求缺少/失效的业务头，
       // 不能把已登录用户强行送到 /login；门户的登录页可能继续跳到 /setting/profile。
       // 保留当前页面，让下一次低频探测、页面查询或用户主动登录完成恢复。
-      developerLog('会话自愈保持当前页', { source: 'token-recovery', reason: 'TOKEN_FAIL', redirected: false }, { force: true });
+      if (Date.now() - tokenFailureLoggedAt >= 15000) {
+        tokenFailureLoggedAt = Date.now();
+        developerLog('会话自愈保持当前页', { source: 'token-recovery', reason: 'TOKEN_FAIL', redirected: false }, { force: true });
+      }
     }
     return result;
   }
