@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         江西省县域医共体 - 自动诊断候选
 // @namespace    local.jiangxi.radiation
-// @version      0.8.27
+// @version      0.8.28
 // @updateURL   https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @downloadURL https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @description  以页面实时推送为主、轻量协议探测为兜底，按可配置规则识别后优先通过系统协议进入诊断；支持可控开发者诊断日志。
@@ -93,6 +93,8 @@
   let probeTimer = null;
   let running = false;
   let entryRunning = false;
+  // 进入诊断后冻结候选处理，直到返回列表页；避免一个医生会话同时打开多个客户。
+  let diagnosisActive = false;
   let probeRunning = false;
   let listRefreshRunning = false;
   let lastStatusHash = '';
@@ -248,7 +250,7 @@
     console.info(`[自动诊断][开发者] ${JSON.stringify(item)}`);
   }
   function developerLogText() {
-    return JSON.stringify({ version: '0.8.27', exportedAt: new Date().toISOString(), events: debugEvents }, null, 2);
+    return JSON.stringify({ version: '0.8.28', exportedAt: new Date().toISOString(), events: debugEvents }, null, 2);
   }
   function developerModeStateText() {
     if (!config.developerMode) return '当前关闭';
@@ -823,6 +825,7 @@
   }
 
   function clickDiagnose(d) {
+    if (diagnosisActive) return false;
     if (!d?.row) return false;
     const current = rowData(d.row);
     if (!isPendingReport(current)) {
@@ -1031,6 +1034,7 @@
       console.info('[自动诊断] 协议校验通过，打开诊断页', { hasReportId: true });
       developerLog('协议进入成功', { ...debugCandidate(entryData), durationMs: Date.now() - startedAt });
       // 直接使用业务路由，诊断页会按系统原流程继续获取并锁定记录。
+      diagnosisActive = true;
       pageWindow().location.href = `/radiation/report?${query.toString()}`;
       return true;
     } catch (e) {
@@ -1049,7 +1053,7 @@
   }
 
   async function enterDiagnosis(d) {
-    if (entryRunning) return false;
+    if (entryRunning || diagnosisActive || pageWindow().location.pathname !== '/radiation') return false;
     if (d?.__entryBlocked) {
       developerLog('进入前硬门禁拒绝', { ...debugCandidate(d), reason: d.__entryBlocked });
       return false;
@@ -1136,11 +1140,12 @@
     return false;
   }
   async function refreshRemoteCandidates(options = {}) {
+    if (diagnosisActive || pageWindow().location.pathname !== '/radiation') return false;
     const now = Date.now();
     const force = options.force === true;
     const match = options.match && typeof options.match === 'object' ? options.match : null;
     const normalCooldown = Math.max(10000, Number(config.listHeartbeatMs) || 15000);
-    const cooldown = force ? 3000 : normalCooldown;
+    const cooldown = force ? 500 : normalCooldown;
     if (listRefreshRunning || now - lastListFetchAt < cooldown) {
       // 保留 WebSocket 携带的精确线索，待当前请求结束或冷却结束后再按该线索取列表。
       if (match) queuedRealtimeMatch = match;
@@ -1160,7 +1165,7 @@
   async function probeStatus() {
     // 协议探测不依赖表格 DOM，隐藏标签页也继续工作；浏览器冻结页面时则由 WebSocket
     // 消息在恢复后补上。DOM 扫描仍由 scan() 自己限制为前台执行。
-    if (!config.enabled || config.entryMode === 'click' || probeRunning || pageWindow().location.pathname !== '/radiation') return;
+    if (diagnosisActive || !config.enabled || config.entryMode === 'click' || probeRunning || pageWindow().location.pathname !== '/radiation') return;
     if (!accountAllowed()) return;
     probeRunning = true;
     const startedAt = Date.now();
@@ -1212,11 +1217,12 @@
   }
 
   function queueRealtimeRefresh(options = {}) {
-    if (!config.enabled || config.entryMode === 'click' || !config.realtimeHints || pageWindow().location.pathname !== '/radiation') return;
+    if (diagnosisActive || !config.enabled || config.entryMode === 'click' || !config.realtimeHints || pageWindow().location.pathname !== '/radiation') return;
     if (!accountAllowed()) return;
     if (options.match && typeof options.match === 'object') queuedRealtimeMatch = options.match;
     if (realtimeRefreshTimer) return;
-    const minGap = 3000;
+    // 同一条 WebSocket 线索只保留极短的合并窗口；正常情况下请求应在 1 秒内发出。
+    const minGap = 250;
     const delay = Math.max(0, minGap - (Date.now() - lastRealtimeRefreshAt));
     developerLog('实时列表调度', { source: 'websocket', delayMs: delay, narrow: !!options.match });
     realtimeRefreshTimer = setTimeout(async () => {
@@ -1236,7 +1242,7 @@
   }
 
   async function processRealtimeHint(hint) {
-    if (!config.enabled || config.entryMode === 'click' || !config.realtimeHints || pageWindow().location.pathname !== '/radiation') return;
+    if (diagnosisActive || !config.enabled || config.entryMode === 'click' || !config.realtimeHints || pageWindow().location.pathname !== '/radiation') return;
     if (!accountAllowed()) return;
     if (!hint || typeof hint !== 'object') {
       queueRealtimeRefresh();
@@ -1383,7 +1389,7 @@
   }
 
   async function scan() {
-    if (!config.enabled || running || document.visibilityState === 'hidden') return;
+    if (diagnosisActive || !config.enabled || running || document.visibilityState === 'hidden') return;
     if (!accountAllowed()) return;
     running = true;
     try {
@@ -1496,6 +1502,7 @@
 
   function start() {
     if (pageWindow().location.pathname !== '/radiation') return;
+    diagnosisActive = false;
     if (timer) clearInterval(timer);
     if (probeTimer) clearTimeout(probeTimer);
     if (realtimeRefreshTimer) clearTimeout(realtimeRefreshTimer);

@@ -62,17 +62,17 @@
 - 0.8.18 route-guard patch：`node --check`、15 项源码契约和 `git diff --check` 通过；路由离开 `/radiation` 时会停止运行时计时器和 MutationObserver，并记录 `路由变化`。当前源码没有 `/setting/profile` 字符串，因此该跳转仍需在真实浏览器运行时用开发者记录确认来源。
 - 0.8.19 profile-redirect fix：浏览器存储日志已确认 `TOKEN_FAIL -> /login -> /setting/profile`；修复后 `/radiation` 中的 TOKEN_FAIL 只记录并保持当前页，自动流程不再导航 `/login`。当前仍需在 Tampermonkey 中确认 0.8.19 已加载。
 - 0.8.20 direct-login route：当页面直接打开 `/radiation`、协议登录开关开启、账号非空且没有 Auth Cookie 时，会先执行现有密码/验证码协议登录，再启动列表扫描；不要求用户先访问 `/login`。
-- 0.8.27 CAPTCHA OCR：`python -m py_compile tools/captcha_ocr_server.py` 通过；算式 `99-40=`、加法、四位数字和除零失败分支通过；本机 `8766` 已被 OAuth 代理占用，OCR 服务改为只监听 `127.0.0.1:18766`，识别失败回退手工输入。
+- 0.8.28 CAPTCHA OCR：`python -m py_compile tools/captcha_ocr_server.py` 通过；算式 `99-40=`、加法、四位数字和除零失败分支通过；本机 `8766` 已被 OAuth 代理占用，OCR 服务改为只监听 `127.0.0.1:18766`，识别失败回退手工输入。
 
-仍需浏览器验证：真实登录会话下触发 2002 后是否能恢复、直接登录跳转是否成功，以及 Tampermonkey 是否已加载 0.8.27。
+仍需浏览器验证：真实登录会话下触发 2002 后是否能恢复、直接登录跳转是否成功，以及 Tampermonkey 是否已加载 0.8.28。
 
 ## 当前运行态补充验证（2026-10-01）
 
 - CUA 读取到已登录的 `/radiation` 页面，用户为当前登录会话，报告状态筛选为“待诊断”。等待 8 秒后 URL 仍为 `/radiation`，没有再次跳转 `/setting/profile`。
 - 这证明当前页面的路由保持修复在运行态没有立即回归；由于浏览器扩展编辑器页面不能由当前自动化接口读取，仍不能仅凭此观察确认加载的确切脚本版本。
 - OCR 服务已由项目隔离 Python 环境启动，`GET http://127.0.0.1:18766/health` 返回 `{"ok":true,"service":"captcha-ocr"}`。四项 OCR 单元测试、22 项源码契约测试和脚本语法检查通过。
-- 扩展存储的最新运行配置仍来自旧运行版本：配置中没有 0.8.27 新增的 OCR 字段；同一份运行日志连续记录 `statusNum code=2002` 后的“会话自愈保持当前页”且 `redirected:false`，并未再次导航到 `/setting/profile`。这确认路由修复已在旧运行版本生效，但不能把旧运行版本当作 0.8.27 已加载。
-- 直接协议登录刷新保护：源码契约现在覆盖先调用 `/api/admin/user/info`、再显示密码提示的顺序。业务会话有效但 `Auth` 不可读时，应直接复用当前会话；真实浏览器刷新验证仍待加载 0.8.27 后完成。
+- 扩展存储的最新运行配置仍来自旧运行版本：配置中没有 0.8.28 新增的 OCR 字段；同一份运行日志连续记录 `statusNum code=2002` 后的“会话自愈保持当前页”且 `redirected:false`，并未再次导航到 `/setting/profile`。这确认路由修复已在旧运行版本生效，但不能把旧运行版本当作 0.8.28 已加载。
+- 直接协议登录刷新保护：源码契约现在覆盖先调用 `/api/admin/user/info`、再显示密码提示的顺序。业务会话有效但 `Auth` 不可读时，应直接复用当前会话；真实浏览器刷新验证仍待加载 0.8.28 后完成。
 - 浏览器运行态补充：扩展存储当前配置已经出现 `directLogin.ocrEnabled=true` 和 `directLogin.ocrEndpoint=http://127.0.0.1:18766/ocr`，这是 OCR 版本配置标记；刷新后的业务页仍在 `/radiation`，可访问性树中没有“请输入协议登录密码”弹窗。真实 OCR 识别和协议登录仍未执行，不把本次观察扩大为登录成功证明。
 - 随后浏览器当前页可达 `/radiation/report` 诊断表单，报告页显示待诊断/诊断操作和已登录医生信息，证明登录会话与业务报告路由可达；进入动作来源可能包含用户操作，未将其作为脚本自动协议进入的单独证明。
 - 在诊断页继续观察 15 秒后仍保持同一 `/radiation/report` 路由，页面自动保存提示正常更新，没有被列表脚本重新导航或弹出登录密码；这验证了路由离开 `/radiation` 后运行时停止的保护。
