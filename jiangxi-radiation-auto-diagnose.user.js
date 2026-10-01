@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         江西省县域医共体 - 自动诊断候选
 // @namespace    local.jiangxi.radiation
-// @version      0.8.38
+// @version      0.8.39
 // @updateURL   https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @downloadURL https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @description  以页面实时推送为主、轻量协议探测为兜底，按可配置规则识别后优先通过系统协议进入诊断；支持可控开发者诊断日志。
@@ -20,7 +20,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.8.38';
+  const SCRIPT_VERSION = '0.8.39';
 
   // 所有业务规则和页面定位都集中在这里，也可以从表头设置弹窗进入配置面板修改。
   const DEFAULT_CONFIG = {
@@ -142,10 +142,24 @@
   const REALTIME_HINT_EVENT = '__jx_auto_diagnose_ws_hint_v1';
   const DEBUG_EVENT_LIMIT = 240;
   const DEBUG_RETENTION_MS = 10 * 60 * 1000;
+  const DEBUG_CLEANUP_INTERVAL_MS = 60 * 1000;
   const DEBUG_EVENT_THROTTLE_MS = 3000;
   const DEBUG_STORAGE_KEY = 'jx-radiation-auto-diagnose-debug-v1';
   const debugEvents = [];
   const debugLastAt = new Map();
+  let debugCleanupTimer = null;
+
+  function persistDeveloperEvents() {
+    try { GM_setValue(DEBUG_STORAGE_KEY, debugEvents); } catch (_) {}
+  }
+  function scheduleDeveloperCleanup() {
+    if (debugCleanupTimer) return;
+    debugCleanupTimer = setInterval(() => {
+      if (!config.developerMode) return;
+      const changed = pruneDeveloperEvents(Date.now());
+      if (changed) persistDeveloperEvents();
+    }, DEBUG_CLEANUP_INTERVAL_MS);
+  }
 
   function loadDeveloperEvents() {
     if (!config.developerMode) return;
@@ -153,8 +167,10 @@
       const raw = GM_getValue(DEBUG_STORAGE_KEY, []);
       const events = typeof raw === 'string' ? JSON.parse(raw) : raw;
       if (Array.isArray(events)) debugEvents.push(...events.slice(-DEBUG_EVENT_LIMIT));
-      pruneDeveloperEvents();
+      const changed = pruneDeveloperEvents();
+      if (changed) persistDeveloperEvents();
     } catch (_) {}
+    scheduleDeveloperCleanup();
   }
   loadDeveloperEvents();
 
@@ -270,12 +286,14 @@
     return text.replace(/\b\d{6,}\b/g, '[id]').slice(0, 160);
   }
   function pruneDeveloperEvents(now = Date.now()) {
+    const before = debugEvents.length;
     const cutoff = now - DEBUG_RETENTION_MS;
     for (let i = debugEvents.length - 1; i >= 0; i--) {
       const at = Date.parse(debugEvents[i]?.at || '');
       if (!Number.isFinite(at) || at < cutoff) debugEvents.splice(i, 1);
     }
     while (debugEvents.length > DEBUG_EVENT_LIMIT) debugEvents.shift();
+    return before !== debugEvents.length;
   }
   function developerLog(event, detail = {}, options = {}) {
     if (!config.developerMode) return;
@@ -287,7 +305,8 @@
     const item = { at: new Date(now).toISOString(), event, ...detail };
     debugEvents.push(item);
     pruneDeveloperEvents(now);
-    try { GM_setValue(DEBUG_STORAGE_KEY, debugEvents); } catch (_) {}
+    persistDeveloperEvents();
+    scheduleDeveloperCleanup();
     // CUA/浏览器日志桥会把第二个对象参数折叠成“Object”，导致无法判断
     // 候选究竟在哪一步被过滤、排队或拒绝；直接输出完整调试对象，便于十分钟内复盘。
     console.info(`[自动诊断][开发者] ${JSON.stringify(item)}`);
