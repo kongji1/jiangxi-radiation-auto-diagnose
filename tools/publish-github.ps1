@@ -13,7 +13,10 @@ try {
   if ($source -notmatch '@version\s+([^\s]+)') { throw 'Userscript version is missing' }
   $version = $Matches[1]
   $remote = "https://github.com/$Repository.git"
+  $oldNativeErrorPreference = $PSNativeCommandUseErrorActionPreference
+  $PSNativeCommandUseErrorActionPreference = $false
   $probe = git ls-remote $remote 2>$null
+  $PSNativeCommandUseErrorActionPreference = $oldNativeErrorPreference
   if ($LASTEXITCODE -ne 0) {
     throw "GitHub repository is not reachable: $Repository"
   }
