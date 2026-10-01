@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         江西省县域医共体 - 自动诊断候选
 // @namespace    local.jiangxi.radiation
-// @version      0.8.25
+// @version      0.8.26
 // @updateURL   https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @downloadURL https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @description  以页面实时推送为主、轻量协议探测为兜底，按可配置规则识别后优先通过系统协议进入诊断；支持可控开发者诊断日志。
@@ -248,7 +248,7 @@
     console.info(`[自动诊断][开发者] ${JSON.stringify(item)}`);
   }
   function developerLogText() {
-    return JSON.stringify({ version: '0.8.25', exportedAt: new Date().toISOString(), events: debugEvents }, null, 2);
+    return JSON.stringify({ version: '0.8.26', exportedAt: new Date().toISOString(), events: debugEvents }, null, 2);
   }
   function developerModeStateText() {
     if (!config.developerMode) return '当前关闭';
@@ -945,7 +945,7 @@
         ({ response, payload: json } = await fetchJson('/api/ct/rays/rep/list', {
           method: 'POST', credentials: 'include',
           headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-          body: JSON.stringify(radiationListPayload({ ...options, ignoreStatusFilter: true, ignoreModalityFilter: true, ignoreInstitutionFilter: true }))
+          body: JSON.stringify(radiationListPayload({ ...options, match: null, pageSize: 100, ignoreStatusFilter: true, ignoreModalityFilter: true, ignoreInstitutionFilter: true }))
         }, options.timeoutMs || 5000));
       }
       const records = json?.data?.records || json?.data?.list || (Array.isArray(json?.data) ? json.data : []);
