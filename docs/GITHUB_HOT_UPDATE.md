@@ -1,0 +1,36 @@
+# GitHub 推送与 Tampermonkey 热更新
+
+## 目标
+
+Tampermonkey 会读取用户脚本头部的 `@updateURL` 和 `@downloadURL`。脚本发布到 GitHub 后，只要推送新版本并递增 `@version`，Tampermonkey 就能按自己的更新周期检查并安装新版本。
+
+## 当前状态
+
+本地项目原来没有 Git 仓库，也没有可用的 GitHub CLI 登录态，因此没有擅自创建或推送到未知远程仓库。真实仓库地址确定后，再把下面两行加入脚本元数据：
+
+```text
+// @updateURL   https://raw.githubusercontent.com/<owner>/<repo>/main/jiangxi-radiation-auto-diagnose.user.js
+// @downloadURL https://raw.githubusercontent.com/<owner>/<repo>/main/jiangxi-radiation-auto-diagnose.user.js
+```
+
+不要把 `@updateURL` 指向会生成 HTML 的 GitHub 页面地址，必须使用 `raw.githubusercontent.com` 的原始文件地址。
+
+## 推送前检查
+
+在项目根目录运行：
+
+```text
+node --check jiangxi-radiation-auto-diagnose.user.js
+node tests/source-contract.test.mjs
+```
+
+GitHub Actions 会在每次 push 和 pull request 上重复这两项检查。只有检查通过的提交才应作为 Tampermonkey 更新源。
+
+## 发布约定
+
+1. 修改脚本后递增 `@version`。
+2. 同步更新 `PROJECT_STATE.json`、`docs/AI_HANDOFF.md` 和 `docs/VERIFICATION.md`。
+3. 推送到主分支后等待 `Validate Tampermonkey script` 通过。
+4. Tampermonkey 检查到新版本后，再在实际业务页面确认脚本版本和运行日志。
+
+GitHub 推送只解决代码分发，不等同于业务页面已经加载新脚本；运行态仍需浏览器证据确认。

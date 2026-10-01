@@ -1,0 +1,19 @@
+name: Validate Tampermonkey script
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node --check jiangxi-radiation-auto-diagnose.user.js
+      - run: node tests/source-contract.test.mjs
