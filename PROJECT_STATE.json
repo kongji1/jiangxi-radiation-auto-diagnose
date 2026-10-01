@@ -8,7 +8,7 @@
   "protocol": "docs/PROTOCOL.md",
   "verification": "docs/VERIFICATION.md",
   "tampermonkeyLoadedVersion": "not independently confirmed; browser storage exposes directLogin OCR fields but not the metadata version",
-  "liveVerification": "Source contract, syntax, and arithmetic CAPTCHA bridge tests pass for 0.8.31. A live refresh reproduced a native protocol-password prompt while the rendered page already showed the logged-in user and remained /radiation; 0.8.31 adds a read-only app-shell guard to suppress that false prompt. Repeated statusNum code=2002 still records 会话自愈保持当前页 with redirected:false. Real OCR recognition and protocol login remain unverified.",
+  "liveVerification": "Source contract, syntax, release-failure, and arithmetic CAPTCHA bridge tests pass for 0.8.31. A live refresh previously reproduced a native protocol-password prompt while the rendered page already showed the logged-in user and remained /radiation; the read-only app-shell guard suppresses that false prompt. Repeated statusNum code=2002 still records 会话自愈保持当前页 with redirected:false. Real OCR recognition, protocol login, and the newly added dynamic header filters remain unverified in the current browser runtime.",
   "performance": {
     "localScanMs": 2000,
     "statusProbeMs": 5000,
