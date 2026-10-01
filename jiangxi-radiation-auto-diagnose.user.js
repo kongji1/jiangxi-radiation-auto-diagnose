@@ -118,6 +118,9 @@
   // 页面本身只有点击“查询”才会重新取表格；用低频单次定时器代替人工点击。
   let pageQueryHeartbeatTimer = null;
   let visibilityBound = false;
+  let headerObserver = null;
+  let routeWatchTimer = null;
+  let lastObservedPath = '';
   let accountGateState = '';
   const seen = new Map();
   const REALTIME_HINT_EVENT = '__jx_auto_diagnose_ws_hint_v1';
@@ -1391,6 +1394,7 @@
   }
 
   function start() {
+    if (pageWindow().location.pathname !== '/radiation') return;
     if (timer) clearInterval(timer);
     if (probeTimer) clearTimeout(probeTimer);
     if (realtimeRefreshTimer) clearTimeout(realtimeRefreshTimer);
@@ -1412,6 +1416,17 @@
     scan();
     scheduleProbe(0);
     schedulePageQueryHeartbeat();
+  }
+
+  function stopRuntime(reason = 'route-change') {
+    if (timer) { clearInterval(timer); timer = null; }
+    if (probeTimer) { clearTimeout(probeTimer); probeTimer = null; }
+    if (realtimeRefreshTimer) { clearTimeout(realtimeRefreshTimer); realtimeRefreshTimer = null; }
+    if (autoQueryFallbackTimer) { clearTimeout(autoQueryFallbackTimer); autoQueryFallbackTimer = null; }
+    if (pageQueryHeartbeatTimer) { clearTimeout(pageQueryHeartbeatTimer); pageQueryHeartbeatTimer = null; }
+    if (headerObserver) { headerObserver.disconnect(); headerObserver = null; }
+    running = false; entryRunning = false; probeRunning = false; pageQueryRunning = false;
+    developerLog('运行时停止', { source: 'route-guard', reason, route: pageWindow().location.pathname });
   }
 
   const PROFILE_KEY = 'jx-radiation-auto-diagnose-profiles-v1';
@@ -1563,7 +1578,8 @@
   }
 
   function attachToHeaderSettings() {
-    const trigger = document.querySelector('.table-header-setting-btn, [aria-label*="表头"], [title*="表头"], [aria-label*="列设置"], [title*="列设置"]');
+    if (pageWindow().location.pathname !== '/radiation') return;
+    const trigger = document.querySelector('.table-header-setting-btn, .el-table__header-wrapper .column-setting, .el-table__header-wrapper [data-column-setting]');
     if (!trigger || trigger.dataset.jxAutoBound) return;
     trigger.dataset.jxAutoBound = '1';
     trigger.addEventListener('click', () => setTimeout(() => {
@@ -1579,6 +1595,8 @@
   GM_registerMenuCommand('自动诊断：配置', panel);
   GM_registerMenuCommand('自动诊断：启用/停用', () => { config.enabled = !config.enabled; saveConfig(); console.info('[自动诊断] enabled =', config.enabled); });
   window.addEventListener('beforeunload', () => {
+    stopRuntime('beforeunload');
+    if (routeWatchTimer) clearInterval(routeWatchTimer);
     if (timer) clearInterval(timer);
     if (probeTimer) clearTimeout(probeTimer);
     if (realtimeRefreshTimer) clearTimeout(realtimeRefreshTimer);
@@ -1586,16 +1604,26 @@
     if (pageQueryHeartbeatTimer) clearTimeout(pageQueryHeartbeatTimer);
     document.removeEventListener('visibilitychange', onVisibilityChange);
     window.removeEventListener('focus', onVisibilityChange);
+    window.removeEventListener('popstate', watchRoute);
+    window.removeEventListener('hashchange', watchRoute);
     window.removeEventListener(REALTIME_HINT_EVENT, onRealtimeHint);
   });
   installRealtimeHintBridge();
   let bootstrapped = false;
+  function watchRoute() {
+    const path = pageWindow().location.pathname;
+    if (path !== lastObservedPath) {
+      const previous = lastObservedPath; lastObservedPath = path;
+      developerLog('路由变化', { source: 'route-guard', from: previous || '(初始)', to: path }, { force: true });
+      if (path !== '/radiation') stopRuntime('route-exit');
+    }
+    if (path === '/radiation' && !bootstrapped) bootstrap();
+  }
   const bootstrap = async () => {
     // 门户跳转到影像页时，Vue 可能先替换文档再触发 DOMContentLoaded；
     // 登录页也需要启动，用于第二次以后直接协议登录。
     const currentUrl = pageWindow().location;
     if (currentUrl.host === '10.10.94.90:22100' || !['/login', '/radiation'].includes(currentUrl.pathname)) {
-      setTimeout(bootstrap, 2000);
       return;
     }
     if (bootstrapped) return;
@@ -1609,11 +1637,15 @@
       }
     }
     if (currentUrl.pathname === '/login') return;
-    const observer = new MutationObserver(attachToHeaderSettings);
-    if (document.body) observer.observe(document.body, { childList: true, subtree: true });
+    headerObserver = new MutationObserver(attachToHeaderSettings);
+    if (document.body) headerObserver.observe(document.body, { childList: true, subtree: true });
     attachToHeaderSettings();
     start();
   };
+  lastObservedPath = pageWindow().location.pathname;
+  routeWatchTimer = setInterval(watchRoute, 1000);
+  window.addEventListener('popstate', watchRoute);
+  window.addEventListener('hashchange', watchRoute);
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bootstrap, { once: true });
   else bootstrap();
 })();

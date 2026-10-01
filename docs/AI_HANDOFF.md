@@ -142,3 +142,9 @@
 - If the recovered request still returns 2002 and direct login is enabled, the list route schedules one delayed navigation to `/login`, allowing the existing direct-login flow to re-establish the session. The schedule is rate-limited to five minutes.
 - The settings panel now exposes a read-only self-check for route, page rows, account gate, session info, and `statusNum`. Body-row discovery tries the configured selector and common Element Plus fallbacks.
 - Source version is 0.8.18. Browser runtime loading and a real logged-in recovery cycle remain unverified.
+
+## 2026-10-01 continuation: route guard for profile redirect
+
+- The source does not contain a `/setting/profile` navigation target. 0.8.18 now records route changes in developer mode and stops all timers, observers, and candidate processing as soon as the page leaves `/radiation`.
+- Header settings integration is restricted to known table-column controls. Broad `title`/`aria-label` matching was removed so unrelated profile/navigation controls cannot receive the settings handler.
+- The GitHub hot-update helper now uses explicit UTF-8 reads/writes and refuses to overwrite the userscript when the source cannot be read. Do not run an older copy of the helper against the Chinese userscript.
