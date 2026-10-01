@@ -19,6 +19,14 @@ Tampermonkey 会读取用户脚本头部的 `@updateURL` 和 `@downloadURL`。�
 
 ## 推送前检查
 
+本地发布检查可运行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/verify-release.ps1
+```
+
+如果暂时没有启动 OCR 服务，可使用 `-SkipOcrHealth`，但不能把该结果当作登录链路验证。
+
 在项目根目录运行：
 
 ```text

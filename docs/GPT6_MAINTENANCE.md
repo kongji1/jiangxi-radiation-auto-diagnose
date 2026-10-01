@@ -21,6 +21,8 @@
 5. 对状态、锁定、申请时间和账号门禁做正向与反向测试。
 6. 更新 `PROJECT_STATE.json`、`AI_HANDOFF.md`、`VERIFICATION.md`，区分源码证据和浏览器证据。
 
+发布前可直接运行 `powershell -ExecutionPolicy Bypass -File tools/verify-release.ps1`。它会检查脚本语法、22 项源码契约、4 项 OCR 测试、OCR 健康接口和 Git 工作区；浏览器实际加载版本、真实协议登录和候选进入仍必须单独记录。
+
 ## 行为不变量
 
 - 只有待诊断状态 `102501` 且未被其它用户锁定的记录可以调用 `assertAllowEnter`。
