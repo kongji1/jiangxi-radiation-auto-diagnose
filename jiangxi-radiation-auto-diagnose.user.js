@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         江西省县域医共体 - 自动诊断候选
 // @namespace    local.jiangxi.radiation
-// @version      0.8.34
+// @version      0.8.35
 // @updateURL   https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @downloadURL https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @description  以页面实时推送为主、轻量协议探测为兜底，按可配置规则识别后优先通过系统协议进入诊断；支持可控开发者诊断日志。
@@ -20,7 +20,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.8.34';
+  const SCRIPT_VERSION = '0.8.35';
 
   // 所有业务规则和页面定位都集中在这里，也可以从表头设置弹窗进入配置面板修改。
   const DEFAULT_CONFIG = {
@@ -197,6 +197,18 @@
     if (Number(original?.configSchema || 0) < 2) {
       value.pageQueryRefresh = true;
       value.configSchema = 2;
+    }
+    // Older builds could persist the visual “不限” sentinel instead of the
+    // internal empty-array representation.  Treat both forms identically so
+    // a saved unlimited setting cannot silently become a restrictive filter.
+    for (const field of ['reportStatuses', 'imageStatuses', 'encounterTypes', 'gender', 'modalities', 'applyInstitution', 'checkHospitals', 'bodyParts', 'diagnosisDoctors', 'examNames', 'examNamesExtra']) {
+      if (Array.isArray(value[field]) && value[field].some(item => norm(item) === '不限')) value[field] = [];
+    }
+    if (!value.age || typeof value.age !== 'object') value.age = { min: null, max: null, unlimited: true };
+    if (value.age.unlimited || (value.age.min == null && value.age.max == null)) {
+      value.age.unlimited = true;
+      value.age.min = null;
+      value.age.max = null;
     }
     return value;
   }
@@ -989,6 +1001,14 @@
       const records = json?.data?.records || json?.data?.list || (Array.isArray(json?.data) ? json.data : []);
       if (!response.ok || json?.code !== 200 || !Array.isArray(records)) {
         developerLog('列表请求结果', { source: options.reason || 'list', ok: false, httpOk: !!response.ok, code: json?.code ?? null, count: 0, durationMs: Date.now() - startedAt });
+        // When the protocol session is rejected but the rendered workbench is
+        // still usable, let the page's own Axios request refresh its session
+        // headers once.  This is a bounded visible-page fallback, not a new
+        // polling loop; the existing 15-second query gate remains in force.
+        if (json?.code === 2002 && options.reason && options.reason !== 'status-probe') {
+          const refreshed = await refreshPageListOnFocus({ automatic: true });
+          developerLog('TOKEN_FAIL页面查询兜底', { source: options.reason, refreshed, code: 2002 });
+        }
         return [];
       }
       developerLog('列表请求结果', { source: options.reason || 'list', ok: true, count: records.length, durationMs: Date.now() - startedAt });
@@ -1572,6 +1592,16 @@
     lastRealtimeHintAt = 0;
     queuedRealtimeMatch = null;
     queuedRealtimeHintAt = 0;
+    developerLog('配置门禁快照', {
+      source: 'runtime-start',
+      encounterUnlimited: !(config.encounterTypes || []).length,
+      ageUnlimited: !!config.age?.unlimited || (config.age?.min == null && config.age?.max == null),
+      modalityUnlimited: !(config.modalities || []).length,
+      examUnlimited: !(config.examNames || []).length && !(config.examNamesExtra || []).length,
+      institutionUnlimited: !(config.applyInstitution || []).length,
+      applicationTimeMode: config.applicationTime?.mode || 'all',
+      reportStatusCount: (config.reportStatuses || []).length
+    }, { force: true });
     // 先以当前页面表格为基线，避免打开脚本时因为“不限时间”一次性抢走旧记录。
     lastListFetchAt = Date.now();
     lastRealtimeRefreshAt = 0;

@@ -144,6 +144,14 @@
 - WebSocket field copying now includes conclusion/description variants so priority works without a full list refresh.
 - `node --check` passed for 0.8.17.
 
+## 2026-10-01 continuation: runtime unlimited-config evidence and TOKEN_FAIL fallback (0.8.35)
+
+- Do not infer the active filters from `DEFAULT_CONFIG`. Runtime developer logs now emit a sanitized `配置门禁快照` at every `/radiation` start. It records only whether encounter type, age, modality, exam and institution filters are unlimited, plus application-time mode and report-status count.
+- Config migration converts a persisted visual `不限` array sentinel to the internal empty-array representation and normalizes an age configuration with empty bounds to `unlimited=true`. This prevents an old saved profile from silently filtering an otherwise unlimited candidate.
+- A live query for 陈招发 showed `2026-10-01 16:44:47`, CT, 肺部平扫, and eventual `已审核` at `16:54:05` by another doctor. The active configuration must be checked from the runtime snapshot before attributing the miss to age, encounter type or exam.
+- The same live session produced `TOKEN_FAIL (2002)` for the read-only list path with `count=0`. After the bounded protocol recovery path fails, 0.8.35 allows one existing page-query fallback when the page is usable; it is protected by the existing 15-second query gate and does not create a polling loop.
+- Source contract, syntax, release-failure and CAPTCHA tests pass for 0.8.35. Tampermonkey runtime loading and the exact historical WebSocket event for 陈招发 remain separate live evidence requirements.
+
 
 
 ## 2026-10-01 continuation: recovery and self-healing (0.8.18)
