@@ -1,9 +1,9 @@
-// ==UserScript==
-// @name         江西省县域医共体 - 自动诊断候选
-// @namespace    local.jiangxi.radiation
+﻿// ==UserScript==
+// @name         姹熻タ鐪佸幙鍩熷尰鍏变綋 - 鑷姩璇婃柇鍊欓€?// @namespace    local.jiangxi.radiation
 // @version      0.8.18
-// @description  以页面实时推送为主、轻量协议探测为兜底，按可配置规则识别后优先通过系统协议进入诊断；支持可控开发者诊断日志。
-// @match        http://10.10.94.90:22112/*
+// @updateURL   https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
+// @downloadURL https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
+// @description  浠ラ〉闈㈠疄鏃舵帹閫佷负涓汇€佽交閲忓崗璁帰娴嬩负鍏滃簳锛屾寜鍙厤缃鍒欒瘑鍒悗浼樺厛閫氳繃绯荤粺鍗忚杩涘叆璇婃柇锛涙敮鎸佸彲鎺у紑鍙戣€呰瘖鏂棩蹇椼€?// @match        http://10.10.94.90:22112/*
 // @match        http://10.10.94.90:22100/*
 // @run-at       document-start
 // @grant        GM_registerMenuCommand
@@ -15,71 +15,54 @@
 (function () {
   'use strict';
 
-  // 所有业务规则和页面定位都集中在这里，也可以从表头设置弹窗进入配置面板修改。
-  const DEFAULT_CONFIG = {
+  // 鎵€鏈変笟鍔¤鍒欏拰椤甸潰瀹氫綅閮介泦涓湪杩欓噷锛屼篃鍙互浠庤〃澶磋缃脊绐楄繘鍏ラ厤缃潰鏉夸慨鏀广€?  const DEFAULT_CONFIG = {
     configSchema: 2,
     enabled: true,
-    // 默认关闭；本次旧配置迁移会临时开启，关闭后会按用户选择持久化。
-    developerMode: false,
-    // [] 表示不限登录账号；填写账号编号或登录名后，仅对匹配账号启用自动诊断。
-    allowedAccounts: [],
-    // 协议登录只保存账号，不保存密码；密码仅在当前页面会话内存中使用。
-    directLogin: { enabled: false, username: '' },
-    // DOM 扫描只在本地进行；服务器探测单独使用 statusNum，前台默认 5 秒一次，后台自动降到较低频率并带退避。
-    pollMs: 2000,
+    // 榛樿鍏抽棴锛涙湰娆℃棫閰嶇疆杩佺Щ浼氫复鏃跺紑鍚紝鍏抽棴鍚庝細鎸夌敤鎴烽€夋嫨鎸佷箙鍖栥€?    developerMode: false,
+    // [] 琛ㄧず涓嶉檺鐧诲綍璐﹀彿锛涘～鍐欒处鍙风紪鍙锋垨鐧诲綍鍚嶅悗锛屼粎瀵瑰尮閰嶈处鍙峰惎鐢ㄨ嚜鍔ㄨ瘖鏂€?    allowedAccounts: [],
+    // 鍗忚鐧诲綍鍙繚瀛樿处鍙凤紝涓嶄繚瀛樺瘑鐮侊紱瀵嗙爜浠呭湪褰撳墠椤甸潰浼氳瘽鍐呭瓨涓娇鐢ㄣ€?    directLogin: { enabled: false, username: '' },
+    // DOM 鎵弿鍙湪鏈湴杩涜锛涙湇鍔″櫒鎺㈡祴鍗曠嫭浣跨敤 statusNum锛屽墠鍙伴粯璁?5 绉掍竴娆★紝鍚庡彴鑷姩闄嶅埌杈冧綆棰戠巼骞跺甫閫€閬裤€?    pollMs: 2000,
     statusProbeMs: 5000,
-    // 页面已有 WebSocket 推送时即时触发；没有推送或消息不完整时按此间隔补偿一次列表。
-    realtimeHints: true,
+    // 椤甸潰宸叉湁 WebSocket 鎺ㄩ€佹椂鍗虫椂瑙﹀彂锛涙病鏈夋帹閫佹垨娑堟伅涓嶅畬鏁存椂鎸夋闂撮殧琛ュ伩涓€娆″垪琛ㄣ€?    realtimeHints: true,
     listHeartbeatMs: 15000,
-    // 后台候选处理默认只走协议，不替用户点击页面“查询”；需要同步可见表格时再手动开启。
-    pageQueryRefresh: true,
+    // 鍚庡彴鍊欓€夊鐞嗛粯璁ゅ彧璧板崗璁紝涓嶆浛鐢ㄦ埛鐐瑰嚮椤甸潰鈥滄煡璇⑩€濓紱闇€瑕佸悓姝ュ彲瑙佽〃鏍兼椂鍐嶆墜鍔ㄥ紑鍚€?    pageQueryRefresh: true,
     clickDelayMs: 700,
-    // 待诊断在当前系统中的状态值；脚本会优先点击这个复选框，再读取表格。
-    pendingStatusValue: '102501',
-    reportStatuses: ['待诊断'],
+    // 寰呰瘖鏂湪褰撳墠绯荤粺涓殑鐘舵€佸€硷紱鑴氭湰浼氫紭鍏堢偣鍑昏繖涓閫夋锛屽啀璇诲彇琛ㄦ牸銆?    pendingStatusValue: '102501',
+    reportStatuses: ['寰呰瘖鏂?],
     imageStatuses: [],
-    encounterTypes: ['门诊', '急诊'], // [] 表示不限；住院不会被默认放行
-    gender: [],                         // [] 表示不限；可填 ['男'] 或 ['女']
-    age: { min: 18, max: 40, unlimited: false }, // unlimited=true 或边界为空表示不限
-    modalities: ['CT'],                // [] 表示不限
+    encounterTypes: ['闂ㄨ瘖', '鎬ヨ瘖'], // [] 琛ㄧず涓嶉檺锛涗綇闄笉浼氳榛樿鏀捐
+    gender: [],                         // [] 琛ㄧず涓嶉檺锛涘彲濉?['鐢?] 鎴?['濂?]
+    age: { min: 18, max: 40, unlimited: false }, // unlimited=true 鎴栬竟鐣屼负绌鸿〃绀轰笉闄?    modalities: ['CT'],                // [] 琛ㄧず涓嶉檺
     patientNameContains: '',
     applicationNoContains: '',
-    applyInstitution: [],               // [] 表示不限；填写后按行文本或数据属性匹配
-    // 数值越大越优先；未列出的项目按 0 处理。设置界面支持“名称=权重”逐行编辑。
-    examWeights: ['头颅平扫=100', '颅脑平扫=95', '腰椎间盘平扫=80', '颈椎间盘平扫=75', '肋骨平扫=10'],
+    applyInstitution: [],               // [] 琛ㄧず涓嶉檺锛涘～鍐欏悗鎸夎鏂囨湰鎴栨暟鎹睘鎬у尮閰?    // 鏁板€艰秺澶ц秺浼樺厛锛涙湭鍒楀嚭鐨勯」鐩寜 0 澶勭悊銆傝缃晫闈㈡敮鎸佲€滃悕绉?鏉冮噸鈥濋€愯缂栬緫銆?    examWeights: ['澶撮骞虫壂=100', '棰呰剳骞虫壂=95', '鑵版闂寸洏骞虫壂=80', '棰堟闂寸洏骞虫壂=75', '鑲嬮骞虫壂=10'],
     institutionWeights: [],
     preliminaryReportFirst: true,
-    auditDoctors: [],                   // [] 表示不限
+    auditDoctors: [],                   // [] 琛ㄧず涓嶉檺
     applicationTime: { mode: 'window', minMinutes: 5, maxMinutes: 30, days: 3, start: '00:00' },
     diagnosisTime: { mode: 'all', days: 3, start: '00:00' },
     examNames: [
-      '头颅平扫',
-      '颅脑平扫',
-      '腰椎间盘平扫',
-      '腰椎椎间盘平扫',
-      '颈椎间盘平扫',
-      '颈椎椎间盘平扫'
+      '澶撮骞虫壂',
+      '棰呰剳骞虫壂',
+      '鑵版闂寸洏骞虫壂',
+      '鑵版妞庨棿鐩樺钩鎵?,
+      '棰堟闂寸洏骞虫壂',
+      '棰堟妞庨棿鐩樺钩鎵?
     ],
     examNamesExtra: [],
-    // 动态收集当前列表中出现过的检查项目，供设置界面勾选。
-    examNamesCatalog: [],
-    // 兼容旧版本字段；新版本使用 examSiteCount，默认不限检查部位数量。
-    singleSiteOnly: false,
+    // 鍔ㄦ€佹敹闆嗗綋鍓嶅垪琛ㄤ腑鍑虹幇杩囩殑妫€鏌ラ」鐩紝渚涜缃晫闈㈠嬀閫夈€?    examNamesCatalog: [],
+    // 鍏煎鏃х増鏈瓧娈碉紱鏂扮増鏈娇鐢?examSiteCount锛岄粯璁や笉闄愭鏌ラ儴浣嶆暟閲忋€?    singleSiteOnly: false,
     examSiteCount: { min: null, max: null },
-    // 协议优先会先调用系统的允许进入接口，再打开诊断页；取不到记录编号时回退到页面按钮。
-    entryMode: 'protocol-first',
-    // 同一行多个检查项目的分隔符。需要支持其它医院命名时可扩展。
-    examSeparators: /[,，、+＋;；\\/]/,
+    // 鍗忚浼樺厛浼氬厛璋冪敤绯荤粺鐨勫厑璁歌繘鍏ユ帴鍙ｏ紝鍐嶆墦寮€璇婃柇椤碉紱鍙栦笉鍒拌褰曠紪鍙锋椂鍥為€€鍒伴〉闈㈡寜閽€?    entryMode: 'protocol-first',
+    // 鍚屼竴琛屽涓鏌ラ」鐩殑鍒嗛殧绗︺€傞渶瑕佹敮鎸佸叾瀹冨尰闄㈠懡鍚嶆椂鍙墿灞曘€?    examSeparators: /[,锛屻€?锛?锛沑\/]/,
     selectors: {
       bodyRows: 'table.el-table__body tbody tr',
       statusInput: 'input[type="checkbox"][value="{pendingStatusValue}"]',
       searchButton: 'button.el-button--primary',
       operatorItems: '.operator .table-operator-item',
-      // 找不到诊断图标时的兼容回退序号；正常情况按图标名称识别。
-      diagnoseOperatorIndex: 0
+      // 鎵句笉鍒拌瘖鏂浘鏍囨椂鐨勫吋瀹瑰洖閫€搴忓彿锛涙甯告儏鍐垫寜鍥炬爣鍚嶇О璇嗗埆銆?      diagnoseOperatorIndex: 0
     },
-    // 防止同一检查在刷新/翻页后再次打开。仅保存短字符串，不保存患者姓名等额外信息。
-    seenLimit: 500
+    // 闃叉鍚屼竴妫€鏌ュ湪鍒锋柊/缈婚〉鍚庡啀娆℃墦寮€銆備粎淇濆瓨鐭瓧绗︿覆锛屼笉淇濆瓨鎮ｈ€呭鍚嶇瓑棰濆淇℃伅銆?    seenLimit: 500
   };
 
   const STORAGE_KEY = 'jx-radiation-auto-diagnose-config-v1';
@@ -98,23 +81,18 @@
   let realtimeRecordRunning = false;
   let lastRealtimeRefreshAt = 0;
   let lastRealtimeHintAt = 0;
-  // WebSocket 提示可能先于列表请求完成；保存最近一条可识别线索，避免并发请求时丢失。
-  let queuedRealtimeMatch = null;
-  // 页面 Axios 还会发送登录用户 UID/USER-INFO；按需读取一次当前会话，值只留在内存中。
-  let sessionIdentity = { info: null, uid: '', loading: false, lastAttemptAt: 0, loadedAt: 0 };
+  // WebSocket 鎻愮ず鍙兘鍏堜簬鍒楄〃璇锋眰瀹屾垚锛涗繚瀛樻渶杩戜竴鏉″彲璇嗗埆绾跨储锛岄伩鍏嶅苟鍙戣姹傛椂涓㈠け銆?  let queuedRealtimeMatch = null;
+  // 椤甸潰 Axios 杩樹細鍙戦€佺櫥褰曠敤鎴?UID/USER-INFO锛涙寜闇€璇诲彇涓€娆″綋鍓嶄細璇濓紝鍊煎彧鐣欏湪鍐呭瓨涓€?  let sessionIdentity = { info: null, uid: '', loading: false, lastAttemptAt: 0, loadedAt: 0 };
   let sessionIdentityRequest = null;
   let directPassword = '';
   let directLoginRunning = false;
   let reauthScheduledAt = 0;
-  // 业务前端会从 WebRTC ICE 候选中附带客户端地址；缺少该头时只读接口会返回 TOKEN_FAIL(2002)。
-  let clientIp = '';
+  // 涓氬姟鍓嶇浼氫粠 WebRTC ICE 鍊欓€変腑闄勫甫瀹㈡埛绔湴鍧€锛涚己灏戣澶存椂鍙鎺ュ彛浼氳繑鍥?TOKEN_FAIL(2002)銆?  let clientIp = '';
   let clientIpRequest = null;
   let pageQueryRunning = false;
   let lastPageQueryAt = 0;
-  // statusNum/WS 均不可用时，低频复用页面原生查询作为兜底。
-  let autoQueryFallbackTimer = null;
-  // 页面本身只有点击“查询”才会重新取表格；用低频单次定时器代替人工点击。
-  let pageQueryHeartbeatTimer = null;
+  // statusNum/WS 鍧囦笉鍙敤鏃讹紝浣庨澶嶇敤椤甸潰鍘熺敓鏌ヨ浣滀负鍏滃簳銆?  let autoQueryFallbackTimer = null;
+  // 椤甸潰鏈韩鍙湁鐐瑰嚮鈥滄煡璇⑩€濇墠浼氶噸鏂板彇琛ㄦ牸锛涚敤浣庨鍗曟瀹氭椂鍣ㄤ唬鏇夸汉宸ョ偣鍑汇€?  let pageQueryHeartbeatTimer = null;
   let visibilityBound = false;
   let accountGateState = '';
   const seen = new Map();
@@ -141,10 +119,9 @@
       if (!saved) return structuredClone(DEFAULT_CONFIG);
       const parsed = typeof saved === 'string' ? JSON.parse(saved) : saved;
       if (parsed.examSeparators?.__regexp) parsed.examSeparators = new RegExp(parsed.examSeparators.__regexp);
-      if (typeof parsed.examNamesExtra === 'string') parsed.examNamesExtra = parsed.examNamesExtra.split(/[,，\n]/).map(norm).filter(Boolean);
+      if (typeof parsed.examNamesExtra === 'string') parsed.examNamesExtra = parsed.examNamesExtra.split(/[,锛孿n]/).map(norm).filter(Boolean);
       if (!Array.isArray(parsed.examNamesCatalog)) parsed.examNamesCatalog = [];
-      // 旧配置没有该字段：为当前排查临时打开一次；用户在设置中关闭后会保存为 false。
-      if (parsed.developerMode == null) {
+      // 鏃ч厤缃病鏈夎瀛楁锛氫负褰撳墠鎺掓煡涓存椂鎵撳紑涓€娆★紱鐢ㄦ埛鍦ㄨ缃腑鍏抽棴鍚庝細淇濆瓨涓?false銆?      if (parsed.developerMode == null) {
         parsed.developerMode = true;
         developerModeMigrationApplied = true;
       }
@@ -156,7 +133,7 @@
       const merged = merge(structuredClone(DEFAULT_CONFIG), parsed);
       return migrateConfig(merged, parsed);
     } catch (e) {
-      console.warn('[自动诊断] 配置读取失败，使用默认配置', e);
+      console.warn('[鑷姩璇婃柇] 閰嶇疆璇诲彇澶辫触锛屼娇鐢ㄩ粯璁ら厤缃?, e);
       return structuredClone(DEFAULT_CONFIG);
     }
   }
@@ -172,9 +149,8 @@
   }
 
   function migrateConfig(value, original = value) {
-    // 0.8.10 期间曾保存过 pageQueryRefresh=false；升级到协议+可见列表同步后，
-    // 旧配置只迁移一次，避免用户必须手动点击查询。之后用户主动关闭会保持关闭。
-    if (Number(original?.configSchema || 0) < 2) {
+    // 0.8.10 鏈熼棿鏇句繚瀛樿繃 pageQueryRefresh=false锛涘崌绾у埌鍗忚+鍙鍒楄〃鍚屾鍚庯紝
+    // 鏃ч厤缃彧杩佺Щ涓€娆★紝閬垮厤鐢ㄦ埛蹇呴』鎵嬪姩鐐瑰嚮鏌ヨ銆備箣鍚庣敤鎴蜂富鍔ㄥ叧闂細淇濇寔鍏抽棴銆?    if (Number(original?.configSchema || 0) < 2) {
       value.pageQueryRefresh = true;
       value.configSchema = 2;
     }
@@ -195,9 +171,8 @@
   }
   function debugTag(d) {
     if (!d) return '';
-    // 只输出不可逆短标签，避免开发者日志带出患者姓名、申请单号或报告编号。
-    const raw = [d.key, d.applicationNo, d.patient, d.applyTime, d.exam, d.modality].filter(Boolean).join('|');
-    return raw ? `候选-${debugHash(raw)}` : '';
+    // 鍙緭鍑轰笉鍙€嗙煭鏍囩锛岄伩鍏嶅紑鍙戣€呮棩蹇楀甫鍑烘偅鑰呭鍚嶃€佺敵璇峰崟鍙锋垨鎶ュ憡缂栧彿銆?    const raw = [d.key, d.applicationNo, d.patient, d.applyTime, d.exam, d.modality].filter(Boolean).join('|');
+    return raw ? `鍊欓€?${debugHash(raw)}` : '';
   }
   function debugApplyAgeMinutes(d) {
     const date = parseDate(d?.applyTime);
@@ -234,26 +209,24 @@
     debugEvents.push(item);
     while (debugEvents.length > DEBUG_EVENT_LIMIT) debugEvents.shift();
     try { GM_setValue(DEBUG_STORAGE_KEY, debugEvents); } catch (_) {}
-    console.info('[自动诊断][开发者]', item);
+    console.info('[鑷姩璇婃柇][寮€鍙戣€匽', item);
   }
   function developerLogText() {
     return JSON.stringify({ version: '0.8.14', exportedAt: new Date().toISOString(), events: debugEvents }, null, 2);
   }
   function developerModeStateText() {
-    if (!config.developerMode) return '当前关闭';
-    return `${developerModeMigrationApplied ? '当前开启（临时排查）' : '当前开启'}（${debugEvents.length} 条）`;
+    if (!config.developerMode) return '褰撳墠鍏抽棴';
+    return `${developerModeMigrationApplied ? '褰撳墠寮€鍚紙涓存椂鎺掓煡锛? : '褰撳墠寮€鍚?}锛?{debugEvents.length} 鏉★級`;
   }
 
-  // 页面偶尔会在姓名/机构之间插入不可见空白；统一清理后再做字段和账号匹配。
-  function norm(s) {
+  // 椤甸潰鍋跺皵浼氬湪濮撳悕/鏈烘瀯涔嬮棿鎻掑叆涓嶅彲瑙佺┖鐧斤紱缁熶竴娓呯悊鍚庡啀鍋氬瓧娈靛拰璐﹀彿鍖归厤銆?  function norm(s) {
     return String(s ?? '').normalize('NFC').replace(/[\s\u200B-\u200D\uFEFF]+/g, '').trim();
   }
   function pageWindow() {
     return typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
   }
-  // 按业务前端的会话拦截器补齐认证和登录用户请求头；只在当前页面内存/请求中使用，
-  // 不写入 GM_*、不输出日志，也不把认证值放入任何持久化结构。
-  function sessionHeaders(input = {}) {
+  // 鎸変笟鍔″墠绔殑浼氳瘽鎷︽埅鍣ㄨˉ榻愯璇佸拰鐧诲綍鐢ㄦ埛璇锋眰澶达紱鍙湪褰撳墠椤甸潰鍐呭瓨/璇锋眰涓娇鐢紝
+  // 涓嶅啓鍏?GM_*銆佷笉杈撳嚭鏃ュ織锛屼篃涓嶆妸璁よ瘉鍊兼斁鍏ヤ换浣曟寔涔呭寲缁撴瀯銆?  function sessionHeaders(input = {}) {
     const headers = { ...input };
     const auth = readCookie('Auth');
     if (auth && !headers.Authorization) headers.Authorization = auth;
@@ -264,8 +237,7 @@
     if (uid && !headers['LOGIN-USER-UID']) headers['LOGIN-USER-UID'] = uid;
     if (uid && !headers['LOGIN-USER-UID']) headers['LOGIN-USER-UID'] = uid;
     if (clientIp && !headers['LOGIN-CLIENT-IP']) headers['LOGIN-CLIENT-IP'] = clientIp;
-    // 与页面拦截器保持一致；不发送菜单/工作站等大字段，也不持久化用户信息。
-    if (info && !info.admin && !headers['USER-INFO']) {
+    // 涓庨〉闈㈡嫤鎴櫒淇濇寔涓€鑷达紱涓嶅彂閫佽彍鍗?宸ヤ綔绔欑瓑澶у瓧娈碉紝涔熶笉鎸佷箙鍖栫敤鎴蜂俊鎭€?    if (info && !info.admin && !headers['USER-INFO']) {
       const safeInfo = { ...info };
       for (const key of ['menuList', 'workStationList', 'modalityList', 'consortium']) delete safeInfo[key];
       try { headers['USER-INFO'] = encodeURIComponent(JSON.stringify(safeInfo)); } catch (_) {}
@@ -344,16 +316,15 @@
       } finally { clearTimeout(timeout); }
     };
     const result = await run(options);
-    // TOKEN_FAIL 常见于页面从门户跳转后旧的用户头已失效；只在明确的 2002
-    // 返回时刷新一次会话身份并重试，避免把正常请求变成双倍流量。
-    if (result.payload?.code === 2002 && !options.__tokenRecoveryRetry) {
+    // TOKEN_FAIL 甯歌浜庨〉闈粠闂ㄦ埛璺宠浆鍚庢棫鐨勭敤鎴峰ご宸插け鏁堬紱鍙湪鏄庣‘鐨?2002
+    // 杩斿洖鏃跺埛鏂颁竴娆′細璇濊韩浠藉苟閲嶈瘯锛岄伩鍏嶆妸姝ｅ父璇锋眰鍙樻垚鍙屽€嶆祦閲忋€?    if (result.payload?.code === 2002 && !options.__tokenRecoveryRetry) {
       sessionIdentity = { info: null, uid: '', loading: false, lastAttemptAt: 0, loadedAt: 0 };
       await ensureSessionIdentity();
       return run({ ...options, __tokenRecoveryRetry: true });
     }
     if (result.payload?.code === 2002 && directLoginConfig().enabled && page.location?.pathname === '/radiation' && Date.now() - reauthScheduledAt > 300000) {
       reauthScheduledAt = Date.now();
-      developerLog('会话自愈调度', { source: 'token-recovery', reason: 'TOKEN_FAIL' }, { force: true });
+      developerLog('浼氳瘽鑷剤璋冨害', { source: 'token-recovery', reason: 'TOKEN_FAIL' }, { force: true });
       setTimeout(() => { if (page.location?.pathname === '/radiation') page.location.replace('/login'); }, 800);
     }
     return result;
@@ -366,7 +337,7 @@
 
   function rsaPassword(password, key) {
     const w = pageWindow();
-    if (!w.RSAUtils || !key?.ownModulus || !key?.exponent) throw new Error('页面 RSA 加密模块尚未加载');
+    if (!w.RSAUtils || !key?.ownModulus || !key?.exponent) throw new Error('椤甸潰 RSA 鍔犲瘑妯″潡灏氭湭鍔犺浇');
     const pair = w.RSAUtils.getKeyPair(key.exponent, '', key.ownModulus);
     return w.RSAUtils.encryptedString(pair, encodeURIComponent(password));
   }
@@ -376,7 +347,7 @@
       const old = document.getElementById('jx-direct-login-captcha'); if (old) old.remove();
       const box = document.createElement('div'); box.id = 'jx-direct-login-captcha';
       box.style.cssText = 'position:fixed;z-index:2147483647;left:50%;top:50%;transform:translate(-50%,-50%);background:#fff;border:1px solid #409eff;border-radius:8px;padding:14px;box-shadow:0 10px 35px #0005;font:14px Segoe UI,Microsoft Yahei,sans-serif;width:260px';
-      box.innerHTML = '<b>协议登录验证码</b><div style="margin:10px 0;text-align:center"><img style="max-width:220px;height:64px;object-fit:contain;border:1px solid #ddd"/></div><input style="box-sizing:border-box;width:100%;padding:7px" maxlength="8" placeholder="请输入验证码"><div style="display:flex;gap:7px;justify-content:flex-end;margin-top:10px"><button type="button" data-c="cancel">取消</button><button type="button" data-c="ok" style="background:#409eff;color:#fff;border:0;border-radius:4px;padding:6px 12px">登录</button></div>';
+      box.innerHTML = '<b>鍗忚鐧诲綍楠岃瘉鐮?/b><div style="margin:10px 0;text-align:center"><img style="max-width:220px;height:64px;object-fit:contain;border:1px solid #ddd"/></div><input style="box-sizing:border-box;width:100%;padding:7px" maxlength="8" placeholder="璇疯緭鍏ラ獙璇佺爜"><div style="display:flex;gap:7px;justify-content:flex-end;margin-top:10px"><button type="button" data-c="cancel">鍙栨秷</button><button type="button" data-c="ok" style="background:#409eff;color:#fff;border:0;border-radius:4px;padding:6px 12px">鐧诲綍</button></div>';
       box.querySelector('img').src = `data:image/jpeg;base64,${imageBase64}`;
       const finish = value => { box.remove(); resolve(value); };
       box.querySelector('[data-c="cancel"]').onclick = () => finish('');
@@ -393,31 +364,31 @@
     directLoginRunning = true;
     try {
       if (!directPassword) {
-        directPassword = window.prompt('请输入协议登录密码（仅本次页面会话使用，不会保存）') || '';
+        directPassword = window.prompt('璇疯緭鍏ュ崗璁櫥褰曞瘑鐮侊紙浠呮湰娆￠〉闈細璇濅娇鐢紝涓嶄細淇濆瓨锛?) || '';
         if (!directPassword) return false;
       }
       const keyRes = await fetch('/api/admin/userLogin/keyPair', { credentials: 'include', headers: { Accept: 'application/json' } });
       const keyJson = await keyRes.json();
       const capRes = await fetch('/api/admin/userLogin/captcha', { credentials: 'include', headers: { Accept: 'application/json' } });
       const capJson = await capRes.json();
-      if (keyJson.code !== 200 || capJson.code !== 200 || !capJson.data?.img || !capJson.data?.uuid) throw new Error('登录参数获取失败');
+      if (keyJson.code !== 200 || capJson.code !== 200 || !capJson.data?.img || !capJson.data?.uuid) throw new Error('鐧诲綍鍙傛暟鑾峰彇澶辫触');
       const code = await askCaptcha(capJson.data.img);
       if (!code) return false;
       const params = new URLSearchParams({ username: dl.username, password: rsaPassword(directPassword, keyJson.data), code, uuid: capJson.data.uuid });
       const loginRes = await fetch(`/api/admin/userLogin/login?${params.toString()}`, { method: 'POST', credentials: 'include', headers: { Accept: 'application/json' } });
       const loginJson = await loginRes.json();
-      if (loginJson.code !== 200 || !loginJson.data) throw new Error(loginJson.message || '协议登录失败');
+      if (loginJson.code !== 200 || !loginJson.data) throw new Error(loginJson.message || '鍗忚鐧诲綍澶辫触');
       document.cookie = `Auth=${encodeURIComponent(loginJson.data)}; path=/`;
       const info = await fetch('/api/admin/user/info', { credentials: 'include', headers: { Accept: 'application/json' } }).then(r => r.json());
-      if (info.code !== 200 || !info.data) throw new Error('登录成功但用户信息未返回');
+      if (info.code !== 200 || !info.data) throw new Error('鐧诲綍鎴愬姛浣嗙敤鎴蜂俊鎭湭杩斿洖');
       if (info.data.logincode) document.cookie = `LoginCode=${encodeURIComponent(info.data.logincode)}; path=/`;
       if (info.data.workStationList?.[0]?.code) document.cookie = `WorkStation=${encodeURIComponent(info.data.workStationList[0].code)}; path=/`;
       directPassword = '';
-      console.info('[自动诊断] 协议登录成功');
+      console.info('[鑷姩璇婃柇] 鍗忚鐧诲綍鎴愬姛');
       return true;
     } catch (e) {
       directPassword = '';
-      console.warn('[自动诊断] 协议登录失败', String(e.message || e));
+      console.warn('[鑷姩璇婃柇] 鍗忚鐧诲綍澶辫触', String(e.message || e));
       return false;
     } finally { directLoginRunning = false; }
   }
@@ -440,8 +411,7 @@
       name = norm(document.querySelector(selector)?.textContent);
       if (name) break;
     }
-    // 某些页面版本没有稳定的 class，只保留头像区域第一行作为登录名。
-    if (!name) {
+    // 鏌愪簺椤甸潰鐗堟湰娌℃湁绋冲畾鐨?class锛屽彧淇濈暀澶村儚鍖哄煙绗竴琛屼綔涓虹櫥褰曞悕銆?    if (!name) {
       const userWrap = document.querySelector('.user-wrap, [class*="user-wrap"]');
       const firstLine = String(userWrap?.innerText || '').split(/\r?\n/).map(norm).find(Boolean);
       if (firstLine) name = firstLine;
@@ -453,8 +423,7 @@
     const r = norm(rule).toLowerCase();
     const v = norm(value).toLowerCase();
     if (!r || !v) return false;
-    // 登录编号要求精确匹配；中文姓名允许页面附带少量展示文字。
-    if (/^\d+$/.test(r) || /^\d+$/.test(v)) return r === v;
+    // 鐧诲綍缂栧彿瑕佹眰绮剧‘鍖归厤锛涗腑鏂囧鍚嶅厑璁搁〉闈㈤檮甯﹀皯閲忓睍绀烘枃瀛椼€?    if (/^\d+$/.test(r) || /^\d+$/.test(v)) return r === v;
     return r === v || (r.length >= 2 && (v.includes(r) || r.includes(v)));
   }
 
@@ -462,38 +431,37 @@
     const rules = (config.allowedAccounts || []).map(norm).filter(Boolean);
     if (!rules.length) return true;
     const identity = loginIdentity();
-    const key = identity.values.join('|') || '(未识别)';
+    const key = identity.values.join('|') || '(鏈瘑鍒?';
     const matched = rules.some(rule => identity.values.some(value => accountValueMatches(rule, value)));
     if (key !== accountGateState) {
       accountGateState = key;
-      console.info('[自动诊断] 登录账号检查', { matched, ruleCount: rules.length, identityFound: identity.values.length > 0 });
-      developerLog('账号门禁', { matched, ruleCount: rules.length, identityFound: identity.values.length > 0 });
+      console.info('[鑷姩璇婃柇] 鐧诲綍璐﹀彿妫€鏌?, { matched, ruleCount: rules.length, identityFound: identity.values.length > 0 });
+      developerLog('璐﹀彿闂ㄧ', { matched, ruleCount: rules.length, identityFound: identity.values.length > 0 });
     }
     return matched;
   }
   function accountDisplay(identity = loginIdentity()) {
-    if (identity.loginCode && identity.name) return `${identity.name}（${identity.loginCode}）`;
-    return identity.loginCode || identity.name || '未识别';
+    if (identity.loginCode && identity.name) return `${identity.name}锛?{identity.loginCode}锛塦;
+    return identity.loginCode || identity.name || '鏈瘑鍒?;
   }
   function parseAge(text) {
-    const m = norm(text).match(/(?:男|女)?(?:[♀♂])?(\d{1,3})岁/);
+    const m = norm(text).match(/(?:鐢穦濂??(?:[鈾€鈾俔)?(\d{1,3})宀?);
     return m ? Number(m[1]) : null;
   }
   function parseGender(text) {
     const t = norm(text);
-    if (t.includes('女')) return '女';
-    if (t.includes('男')) return '男';
+    if (t.includes('濂?)) return '濂?;
+    if (t.includes('鐢?)) return '鐢?;
     return null;
   }
   function parseDate(text) {
-    // norm() 会去掉页面时间中的空格，因此这里同时接受“2026-09-2910:00:00”和带空格/中文日期分隔的格式。
-    const m = String(text || '').match(/(\d{4})[-年](\d{1,2})[-月](\d{1,2})(?:[日T\s]*?(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+    // norm() 浼氬幓鎺夐〉闈㈡椂闂翠腑鐨勭┖鏍硷紝鍥犳杩欓噷鍚屾椂鎺ュ彈鈥?026-09-2910:00:00鈥濆拰甯︾┖鏍?涓枃鏃ユ湡鍒嗛殧鐨勬牸寮忋€?    const m = String(text || '').match(/(\d{4})[-骞碷(\d{1,2})[-鏈圿(\d{1,2})(?:[鏃\s]*?(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
     if (!m) return null;
     return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4] || 0), Number(m[5] || 0), Number(m[6] || 0));
   }
   const REPORT_STATUS_NAMES = Object.freeze({
-    '102501': '待诊断', '102502': '诊断中', '102503': '待审核',
-    '102504': '审核中', '102505': '已审核', '102506': '已打印'
+    '102501': '寰呰瘖鏂?, '102502': '璇婃柇涓?, '102503': '寰呭鏍?,
+    '102504': '瀹℃牳涓?, '102505': '宸插鏍?, '102506': '宸叉墦鍗?
   });
   function formatDateTime(date) {
     const pad = value => String(value).padStart(2, '0');
@@ -549,28 +517,27 @@
     const headerTable = document.querySelector('table.el-table__header');
     const headers = headerTable ? [...headerTable.querySelectorAll('thead th .cell')].map(e => norm(e.innerText)) : [];
     const at = (...names) => { const i = headers.findIndex(x => names.includes(x)); return i >= 0 ? cells[i] : null; };
-    const patient = norm(at('患者信息')?.innerText);
-    const status = norm(at('检查状态')?.innerText);
-    // DOM 行通常没有原始 statusCode；用固定状态字典补齐开发者诊断证据，
-    // 但只把它作为观测值，不用它改动页面筛选条件。
-    const statusCode = norm(
+    const patient = norm(at('鎮ｈ€呬俊鎭?)?.innerText);
+    const status = norm(at('妫€鏌ョ姸鎬?)?.innerText);
+    // DOM 琛岄€氬父娌℃湁鍘熷 statusCode锛涚敤鍥哄畾鐘舵€佸瓧鍏歌ˉ榻愬紑鍙戣€呰瘖鏂瘉鎹紝
+    // 浣嗗彧鎶婂畠浣滀负瑙傛祴鍊硷紝涓嶇敤瀹冩敼鍔ㄩ〉闈㈢瓫閫夋潯浠躲€?    const statusCode = norm(
       row.dataset?.reportStatusCode || row.dataset?.checkStatusCode ||
       row.getAttribute('data-report-status-code') || row.getAttribute('data-check-status-code') ||
       REPORT_STATUS_CODES?.[status] || ''
     );
-    const modality = norm(at('检查类型')?.innerText);
-    const applyTime = norm(at('申请时间')?.innerText);
-    const exam = norm(at('检查项目')?.innerText);
-    const diagnosisTime = norm(at('诊断时间')?.innerText);
-    const doctor = norm(at('诊断医生')?.innerText);
-    const auditDoctor = norm(at('审核医生')?.innerText);
-    const conclusion = norm(at('结论')?.innerText || row.dataset?.conclusion || row.dataset?.reportConclusion);
-    const description = norm(at('描述')?.innerText || at('报告描述')?.innerText || row.dataset?.description);
-    const imageStatus = norm(at('影像状态')?.innerText);
+    const modality = norm(at('妫€鏌ョ被鍨?)?.innerText);
+    const applyTime = norm(at('鐢宠鏃堕棿')?.innerText);
+    const exam = norm(at('妫€鏌ラ」鐩?)?.innerText);
+    const diagnosisTime = norm(at('璇婃柇鏃堕棿')?.innerText);
+    const doctor = norm(at('璇婃柇鍖荤敓')?.innerText);
+    const auditDoctor = norm(at('瀹℃牳鍖荤敓')?.innerText);
+    const conclusion = norm(at('缁撹')?.innerText || row.dataset?.conclusion || row.dataset?.reportConclusion);
+    const description = norm(at('鎻忚堪')?.innerText || at('鎶ュ憡鎻忚堪')?.innerText || row.dataset?.description);
+    const imageStatus = norm(at('褰卞儚鐘舵€?)?.innerText);
     const rowText = norm(row.innerText);
-    const applyNo = norm(at('申请单号')?.innerText) || row.dataset.applyNo || row.dataset.applicationNo || '';
-    const institution = norm(at('申请机构')?.innerText) || row.dataset.applyInstitution || row.dataset.institution || '';
-    const hospital = norm(at('检查医院')?.innerText);
+    const applyNo = norm(at('鐢宠鍗曞彿')?.innerText) || row.dataset.applyNo || row.dataset.applicationNo || '';
+    const institution = norm(at('鐢宠鏈烘瀯')?.innerText) || row.dataset.applyInstitution || row.dataset.institution || '';
+    const hospital = norm(at('妫€鏌ュ尰闄?)?.innerText);
     const checkbox = row.querySelector('input[type="checkbox"]');
     const key = checkbox?.id || [patient, applyTime, modality, exam].join('|');
     return { row, record: null, patient, status, statusCode, locked: domRowLocked(row), imageStatus, modality, applyTime, diagnosisTime, doctor, auditDoctor, conclusion, description, exam, applicationNo: applyNo, institution, hospital, rowText, age: parseAge(patient), gender: parseGender(patient), key };
@@ -589,13 +556,13 @@
     const encounter = norm(record.patSourceValue || record.encounterType || record.visitType || record.patType);
     const gender = norm(record.gender || record.sex);
     const ageValue = record.patAge ?? record.age;
-    const numericAge = ageValue == null || ageValue === '' ? NaN : Number(String(ageValue).replace(/岁/g, ''));
+    const numericAge = ageValue == null || ageValue === '' ? NaN : Number(String(ageValue).replace(/宀?g, ''));
     const age = Number.isFinite(numericAge) ? numericAge : parseAge(String(record.patName || record.patientName || ''));
-    const patient = norm([record.patName || record.patientName, encounter, gender, Number.isFinite(age) ? `${age}岁` : ''].filter(Boolean).join(' '));
+    const patient = norm([record.patName || record.patientName, encounter, gender, Number.isFinite(age) ? `${age}宀乣 : ''].filter(Boolean).join(' '));
     const repUid = record.repUid || record.reportUid || record.reportId || record.id;
     const applicationNo = norm(record.applyNo || record.applicationNo || record.orderId);
     const exam = norm(record.examName || record.exam);
-    const imageStatus = norm(record.imageStatus || (record.imageIsChange === 0 ? '正常' : record.imageIsChange === 1 ? '异常' : ''));
+    const imageStatus = norm(record.imageStatus || (record.imageIsChange === 0 ? '姝ｅ父' : record.imageIsChange === 1 ? '寮傚父' : ''));
     const statusCode = norm(record.reportStatusCode || record.checkStatusCode || record.statusCode);
     const status = norm(record.reportStatus || record.reportStatusName || record.checkStatusName || record.status || REPORT_STATUS_NAMES[statusCode] || statusCode);
     const locked = recordLockState(record);
@@ -616,11 +583,11 @@
   }
 
   function parseWeights(value) {
-    const list = Array.isArray(value) ? value : String(value || '').split(/[,，\n]/);
+    const list = Array.isArray(value) ? value : String(value || '').split(/[,锛孿n]/);
     const out = new Map();
     for (const item of list) {
       const text = String(item || '').trim(); if (!text) continue;
-      const m = text.match(/^(.+?)\s*[=:：]\s*(-?\d+(?:\.\d+)?)\s*$/);
+      const m = text.match(/^(.+?)\s*[=:锛歖\s*(-?\d+(?:\.\d+)?)\s*$/);
       if (m) out.set(norm(m[1]), Number(m[2]));
       else out.set(norm(text), Math.max(0, 100 - out.size));
     }
@@ -633,8 +600,7 @@
     return best;
   }
   function hasPreliminaryConclusion(d) {
-    // 结论字段优先；描述/备注不参与“初写报告”判断，避免把备注误判成报告正文。
-    return !!norm(d?.conclusion);
+    // 缁撹瀛楁浼樺厛锛涙弿杩?澶囨敞涓嶅弬涓庘€滃垵鍐欐姤鍛娾€濆垽鏂紝閬垮厤鎶婂娉ㄨ鍒ゆ垚鎶ュ憡姝ｆ枃銆?    return !!norm(d?.conclusion);
   }
   function candidatePriority(d) {
     const exam = weightOf(d?.exam, config.examWeights);
@@ -647,8 +613,8 @@
   function lockValue(value) {
     if (value === true || value === 1) return true;
     const text = norm(value).toLowerCase();
-    if (['', 'false', '0', 'no', '否', '无', '空', 'none', 'null', 'nil', 'unlocked', 'not locked', 'not occupied', '未锁定', '未占用', '未被占用', '未加锁'].includes(text)) return false;
-    return ['true', '1', 'yes', '是', 'locked', 'lock', '锁定', '占用'].includes(text) || /锁|占用|其他用户|occupied|locked/.test(text);
+    if (['', 'false', '0', 'no', '鍚?, '鏃?, '绌?, 'none', 'null', 'nil', 'unlocked', 'not locked', 'not occupied', '鏈攣瀹?, '鏈崰鐢?, '鏈鍗犵敤', '鏈姞閿?].includes(text)) return false;
+    return ['true', '1', 'yes', '鏄?, 'locked', 'lock', '閿佸畾', '鍗犵敤'].includes(text) || /閿亅鍗犵敤|鍏朵粬鐢ㄦ埛|occupied|locked/.test(text);
   }
   function recordLockState(record) {
     if (!record || typeof record !== 'object') return false;
@@ -658,12 +624,12 @@
   function domRowLocked(row) {
     if (!row) return false;
     const rowLabel = [row.title, row.getAttribute('aria-label'), row.dataset?.lockStatus, row.dataset?.locked, row.textContent].map(norm).join('|');
-    if (/当前报告已被其他用户锁定|已被其他用户锁定|其他用户占用|报告已锁定|报告被占用/.test(rowLabel)) return true;
+    if (/褰撳墠鎶ュ憡宸茶鍏朵粬鐢ㄦ埛閿佸畾|宸茶鍏朵粬鐢ㄦ埛閿佸畾|鍏朵粬鐢ㄦ埛鍗犵敤|鎶ュ憡宸查攣瀹殀鎶ュ憡琚崰鐢?.test(rowLabel)) return true;
     const items = [...row.querySelectorAll(config.selectors.operatorItems)];
     return items.some(item => {
       const icon = operatorIconName(item).toLowerCase();
       const label = [item.getAttribute('title'), item.getAttribute('aria-label'), item.dataset?.tip, item.dataset?.title, item.textContent].map(norm).join('|');
-      return /(?:unlock|un-lock)/.test(icon) || /lock|locked/.test(String(item.className || '').toLowerCase()) || /解锁|已锁定|被锁定|其他用户占用/.test(label);
+      return /(?:unlock|un-lock)/.test(icon) || /lock|locked/.test(String(item.className || '').toLowerCase()) || /瑙ｉ攣|宸查攣瀹殀琚攣瀹殀鍏朵粬鐢ㄦ埛鍗犵敤/.test(label);
     });
   }
   function isPendingReport(d) {
@@ -672,35 +638,35 @@
     const pendingCode = norm(config.pendingStatusValue || '102501');
     const statusCode = norm(d.statusCode || d.record?.reportStatusCode || d.record?.checkStatusCode || d.record?.statusCode);
     const status = norm(d.status || d.record?.reportStatus || d.record?.reportStatusName || d.record?.checkStatusName);
-    if (/诊断中|待审核|审核中|已审核|已打印|占用/.test(status) || (/锁定/.test(status) && !/未锁定/.test(status))) return false;
+    if (/璇婃柇涓瓅寰呭鏍竱瀹℃牳涓瓅宸插鏍竱宸叉墦鍗皘鍗犵敤/.test(status) || (/閿佸畾/.test(status) && !/鏈攣瀹?.test(status))) return false;
     if (statusCode) return statusCode === pendingCode;
-    return status === '待诊断' || status.includes('待诊断');
+    return status === '寰呰瘖鏂? || status.includes('寰呰瘖鏂?);
   }
 
   function matchFailureReasons(d) {
     const reasons = [];
-    if (!isPendingReport(d)) reasons.push(d?.locked || recordLockState(d?.record) ? '报告已锁定/占用' : '报告状态非待诊断');
-    if (config.reportStatuses?.length && !config.reportStatuses.some(x => norm(d.status).includes(norm(x)))) reasons.push('报告状态');
-    if (config.imageStatuses?.length && !config.imageStatuses.some(x => norm(d.imageStatus).includes(norm(x)))) reasons.push('影像状态');
-    if (config.encounterTypes?.length && !config.encounterTypes.some(x => norm(d.patient).includes(norm(x)))) reasons.push('就诊类型');
-    if (config.gender?.length && !config.gender.includes(d.gender)) reasons.push('性别');
+    if (!isPendingReport(d)) reasons.push(d?.locked || recordLockState(d?.record) ? '鎶ュ憡宸查攣瀹?鍗犵敤' : '鎶ュ憡鐘舵€侀潪寰呰瘖鏂?);
+    if (config.reportStatuses?.length && !config.reportStatuses.some(x => norm(d.status).includes(norm(x)))) reasons.push('鎶ュ憡鐘舵€?);
+    if (config.imageStatuses?.length && !config.imageStatuses.some(x => norm(d.imageStatus).includes(norm(x)))) reasons.push('褰卞儚鐘舵€?);
+    if (config.encounterTypes?.length && !config.encounterTypes.some(x => norm(d.patient).includes(norm(x)))) reasons.push('灏辫瘖绫诲瀷');
+    if (config.gender?.length && !config.gender.includes(d.gender)) reasons.push('鎬у埆');
     if (!config.age?.unlimited) {
-      if (config.age?.min != null && (d.age == null || d.age < Number(config.age.min))) reasons.push('年龄下限');
-      if (config.age?.max != null && (d.age == null || d.age > Number(config.age.max))) reasons.push('年龄上限');
+      if (config.age?.min != null && (d.age == null || d.age < Number(config.age.min))) reasons.push('骞撮緞涓嬮檺');
+      if (config.age?.max != null && (d.age == null || d.age > Number(config.age.max))) reasons.push('骞撮緞涓婇檺');
     }
-    if (config.modalities?.length && !config.modalities.some(x => norm(d.modality) === norm(x))) reasons.push('检查类型');
-    if (config.patientNameContains && !norm(d.patient).includes(norm(config.patientNameContains))) reasons.push('姓名');
-    if (config.applicationNoContains && !norm(d.applicationNo || d.rowText).includes(norm(config.applicationNoContains))) reasons.push('申请单号');
-    if (config.applyInstitution?.length && !config.applyInstitution.some(x => norm(d.institution || d.rowText).includes(norm(x)))) reasons.push('申请机构');
-    if (config.auditDoctors?.length && !config.auditDoctors.some(x => norm(d.auditDoctor || d.doctor).includes(norm(x)))) reasons.push('医生');
-    if (!matchTime(d.applyTime, config.applicationTime)) reasons.push('申请时间');
-    if (!matchTime(d.diagnosisTime, config.diagnosisTime)) reasons.push('诊断审核时间');
+    if (config.modalities?.length && !config.modalities.some(x => norm(d.modality) === norm(x))) reasons.push('妫€鏌ョ被鍨?);
+    if (config.patientNameContains && !norm(d.patient).includes(norm(config.patientNameContains))) reasons.push('濮撳悕');
+    if (config.applicationNoContains && !norm(d.applicationNo || d.rowText).includes(norm(config.applicationNoContains))) reasons.push('鐢宠鍗曞彿');
+    if (config.applyInstitution?.length && !config.applyInstitution.some(x => norm(d.institution || d.rowText).includes(norm(x)))) reasons.push('鐢宠鏈烘瀯');
+    if (config.auditDoctors?.length && !config.auditDoctors.some(x => norm(d.auditDoctor || d.doctor).includes(norm(x)))) reasons.push('鍖荤敓');
+    if (!matchTime(d.applyTime, config.applicationTime)) reasons.push('鐢宠鏃堕棿');
+    if (!matchTime(d.diagnosisTime, config.diagnosisTime)) reasons.push('璇婃柇瀹℃牳鏃堕棿');
     const parts = d.exam.split(config.examSeparators).map(norm).filter(Boolean);
     const siteRule = config.examSiteCount || (config.singleSiteOnly ? { min: 1, max: 1 } : { min: null, max: null });
-    if (siteRule.min != null && parts.length < Number(siteRule.min)) reasons.push('检查部位过少');
-    if (siteRule.max != null && parts.length > Number(siteRule.max)) reasons.push('检查部位过多');
+    if (siteRule.min != null && parts.length < Number(siteRule.min)) reasons.push('妫€鏌ラ儴浣嶈繃灏?);
+    if (siteRule.max != null && parts.length > Number(siteRule.max)) reasons.push('妫€鏌ラ儴浣嶈繃澶?);
     const acceptedExams = [...(config.examNames || []), ...(config.examNamesExtra || [])];
-    if (acceptedExams.length && !acceptedExams.some(x => norm(parts[0] || d.exam) === norm(x))) reasons.push('检查项目');
+    if (acceptedExams.length && !acceptedExams.some(x => norm(parts[0] || d.exam) === norm(x))) reasons.push('妫€鏌ラ」鐩?);
     return reasons;
   }
   function matches(d) {
@@ -711,9 +677,8 @@
     return String(config.selectors.statusInput).replace('{pendingStatusValue}', CSS.escape(String(config.pendingStatusValue)));
   }
 
-  // 不再修改页面的状态复选框。页面筛选属于用户交互，协议链路使用
-  // config.reportStatuses 自己构造请求条件，避免后台脚本把用户切换的列表重置为“待诊断”。
-  async function ensurePendingFilter() { return; }
+  // 涓嶅啀淇敼椤甸潰鐨勭姸鎬佸閫夋銆傞〉闈㈢瓫閫夊睘浜庣敤鎴蜂氦浜掞紝鍗忚閾捐矾浣跨敤
+  // config.reportStatuses 鑷繁鏋勯€犺姹傛潯浠讹紝閬垮厤鍚庡彴鑴氭湰鎶婄敤鎴峰垏鎹㈢殑鍒楄〃閲嶇疆涓衡€滃緟璇婃柇鈥濄€?  async function ensurePendingFilter() { return; }
 
   function operatorIconName(item) {
     const use = item?.querySelector?.('use');
@@ -727,10 +692,9 @@
 
   function diagnoseOperator(row) {
     const items = [...row.querySelectorAll(config.selectors.operatorItems)];
-    // 页面在部分状态下会把锁定/解锁图标放在最前面，不能再依赖固定序号。
-    const report = items.find(item => /(?:^|-)report$/i.test(operatorIconName(item)) && !operatorDisabled(item));
+    // 椤甸潰鍦ㄩ儴鍒嗙姸鎬佷笅浼氭妸閿佸畾/瑙ｉ攣鍥炬爣鏀惧湪鏈€鍓嶉潰锛屼笉鑳藉啀渚濊禆鍥哄畾搴忓彿銆?    const report = items.find(item => /(?:^|-)report$/i.test(operatorIconName(item)) && !operatorDisabled(item));
     if (report) return report;
-    const titled = items.find(item => /诊断/.test([item.getAttribute('title'), item.getAttribute('aria-label'), item.dataset?.tip, item.dataset?.title].filter(Boolean).join(' ')) && !operatorDisabled(item));
+    const titled = items.find(item => /璇婃柇/.test([item.getAttribute('title'), item.getAttribute('aria-label'), item.dataset?.tip, item.dataset?.title].filter(Boolean).join(' ')) && !operatorDisabled(item));
     if (titled) return titled;
     const configured = items[Number(config.selectors.diagnoseOperatorIndex)];
     return configured && !operatorDisabled(configured) ? configured : null;
@@ -740,13 +704,13 @@
     if (!d?.row) return false;
     const current = rowData(d.row);
     if (!isPendingReport(current)) {
-      developerLog('页面点击跳过', { ...debugCandidate(current), reason: current.locked ? '报告已锁定/占用' : '报告状态非待诊断' });
+      developerLog('椤甸潰鐐瑰嚮璺宠繃', { ...debugCandidate(current), reason: current.locked ? '鎶ュ憡宸查攣瀹?鍗犵敤' : '鎶ュ憡鐘舵€侀潪寰呰瘖鏂? });
       return false;
     }
     const item = diagnoseOperator(d.row);
     if (!item) {
       const items = [...d.row.querySelectorAll(config.selectors.operatorItems)].map((x, i) => ({ index: i, icon: operatorIconName(x), className: x.className }));
-      console.warn('[自动诊断] 找不到可用的诊断操作按钮', { items });
+      console.warn('[鑷姩璇婃柇] 鎵句笉鍒板彲鐢ㄧ殑璇婃柇鎿嶄綔鎸夐挳', { items });
       return false;
     }
     item.scrollIntoView?.({ block: 'center', inline: 'nearest' });
@@ -755,15 +719,13 @@
     return true;
   }
 
-  // Vue 表格行没有把 repUid 渲染到 DOM。用户脚本仍可从 Vue 的 vnode/component
-  // 引用中取到行对象；遍历范围刻意限制在当前行附近，避免扫描整棵组件树。
-  function findRowRecord(d) {
+  // Vue 琛ㄦ牸琛屾病鏈夋妸 repUid 娓叉煋鍒?DOM銆傜敤鎴疯剼鏈粛鍙粠 Vue 鐨?vnode/component
+  // 寮曠敤涓彇鍒拌瀵硅薄锛涢亶鍘嗚寖鍥村埢鎰忛檺鍒跺湪褰撳墠琛岄檮杩戯紝閬垮厤鎵弿鏁存５缁勪欢鏍戙€?  function findRowRecord(d) {
     const isolatedRoot = d?.row;
     const page = pageWindow();
     let root = isolatedRoot;
-    // Vue 的 __vnode/组件引用位于页面世界；Tampermonkey 隔离世界中的同一 DOM
-    // 节点看不到这些 expando，因此按行序号取一个页面世界节点再读取。
-    try {
+    // Vue 鐨?__vnode/缁勪欢寮曠敤浣嶄簬椤甸潰涓栫晫锛汿ampermonkey 闅旂涓栫晫涓殑鍚屼竴 DOM
+    // 鑺傜偣鐪嬩笉鍒拌繖浜?expando锛屽洜姝ゆ寜琛屽簭鍙峰彇涓€涓〉闈笘鐣岃妭鐐瑰啀璇诲彇銆?    try {
       const rows = queryBodyRows();
       const index = rows.indexOf(isolatedRoot);
       const pageRows = queryBodyRows(page.document);
@@ -782,13 +744,12 @@
     add(root.parentElement?.__vnode);
     add(root.parentElement?.parentElement?.__vueParentComponent);
     add(root.parentElement?.parentElement?.__vnode);
-    const patientName = norm(d.patient).split(/门诊|急诊|住院|体检/)[0];
+    const patientName = norm(d.patient).split(/闂ㄨ瘖|鎬ヨ瘖|浣忛櫌|浣撴/)[0];
     const wanted = [norm(d.applicationNo), patientName, norm(d.applyTime), norm(d.exam)].filter(Boolean);
     const isRecord = value => {
       if (!value || typeof value !== 'object' || !value.repUid) return false;
       const text = norm([value.patName, value.patientName, value.applyNo, value.applicationNo, value.orderId, value.examName, value.checkTime, value.checkinTime, value.applyTime, value.studyDate, value.reportStatus].filter(Boolean).join('|'));
-      // 只接受能与当前行任一字段对应的记录，避免误取同一组件树中的其它行。
-      return !wanted.length || wanted.some(x => text.includes(x));
+      // 鍙帴鍙楄兘涓庡綋鍓嶈浠讳竴瀛楁瀵瑰簲鐨勮褰曪紝閬垮厤璇彇鍚屼竴缁勪欢鏍戜腑鐨勫叾瀹冭銆?      return !wanted.length || wanted.some(x => text.includes(x));
     };
     const seenObj = new WeakSet();
     for (let i = 0; i < queue.length && i < 80; i++) {
@@ -803,8 +764,7 @@
         try { child = value[key]; } catch (_) { continue; }
         if (child && typeof child === 'object') add(child);
       }
-      // Vue 3 的组件实例常把原始 props/响应式行对象放在这些位置。
-      for (const key of ['proxy', 'props', 'setupState', 'data', 'subTree', 'children', 'component', 'ctx', 'exposed']) {
+      // Vue 3 鐨勭粍浠跺疄渚嬪父鎶婂師濮?props/鍝嶅簲寮忚瀵硅薄鏀惧湪杩欎簺浣嶇疆銆?      for (const key of ['proxy', 'props', 'setupState', 'data', 'subTree', 'children', 'component', 'ctx', 'exposed']) {
         try { add(value[key]); } catch (_) {}
       }
     }
@@ -821,14 +781,14 @@
       applyDep: '', applyOrgName: '', opinion: '', patSource: '', bodyPartName: '', examName: '',
       reportStatusCodeList: [], did: '', roomId: '', repGroupList: [], auditGroupList: [],
       sortColumnName: '', sortStatus: '', recentAudit: false, recentDiagnosis: false,
-      docUid: null, patAgeUnit: '岁', sortByParams: [{ sortField: 'checkinTime', sortRule: 'DESC' }], checkOrgId: '', clinicalInfo: '',
+      docUid: null, patAgeUnit: '宀?, sortByParams: [{ sortField: 'checkinTime', sortRule: 'DESC' }], checkOrgId: '', clinicalInfo: '',
       tailOrderIds: [], gender: '', pageNum: 1, pageSize: Math.max(1, Math.min(100, Number(options.pageSize) || 30))
     };
     if (!options.ignoreStatusFilter) payload.reportStatusCodeList = probeStatusCodes();
     if (!options.ignoreModalityFilter) payload.modalityList = Array.isArray(config.modalities) ? [...config.modalities] : [];
     if (!options.ignoreInstitutionFilter && config.applyInstitution?.length === 1) payload.applyOrgName = config.applyInstitution[0];
     if (match) {
-      const patientName = norm(match.patient).split(/门诊|急诊|住院|体检/)[0];
+      const patientName = norm(match.patient).split(/闂ㄨ瘖|鎬ヨ瘖|浣忛櫌|浣撴/)[0];
       if (patientName) payload.patName = patientName;
       if (match.applicationNo) {
         payload.applyNo = match.applicationNo;
@@ -839,9 +799,8 @@
   }
 
   async function fetchRadiationRecords(options = {}) {
-    // 列表接口只读，不会改变报告状态；同时用于协议兜底和更新可选项目。
-    const startedAt = Date.now();
-    developerLog('列表请求开始', {
+    // 鍒楄〃鎺ュ彛鍙锛屼笉浼氭敼鍙樻姤鍛婄姸鎬侊紱鍚屾椂鐢ㄤ簬鍗忚鍏滃簳鍜屾洿鏂板彲閫夐」鐩€?    const startedAt = Date.now();
+    developerLog('鍒楄〃璇锋眰寮€濮?, {
       source: options.reason || 'list', narrow: !!options.match,
       pageSize: Math.max(1, Math.min(100, Number(options.pageSize) || 30))
     });
@@ -854,14 +813,14 @@
       }, options.timeoutMs || 5000);
       const records = json?.data?.records || json?.data?.list || (Array.isArray(json?.data) ? json.data : []);
       if (!response.ok || json?.code !== 200 || !Array.isArray(records)) {
-        developerLog('列表请求结果', { source: options.reason || 'list', ok: false, httpOk: !!response.ok, code: json?.code ?? null, count: 0, durationMs: Date.now() - startedAt });
+        developerLog('鍒楄〃璇锋眰缁撴灉', { source: options.reason || 'list', ok: false, httpOk: !!response.ok, code: json?.code ?? null, count: 0, durationMs: Date.now() - startedAt });
         return [];
       }
-      developerLog('列表请求结果', { source: options.reason || 'list', ok: true, count: records.length, durationMs: Date.now() - startedAt });
+      developerLog('鍒楄〃璇锋眰缁撴灉', { source: options.reason || 'list', ok: true, count: records.length, durationMs: Date.now() - startedAt });
       return records;
     } catch (e) {
-      console.warn('[自动诊断] 列表协议查询失败', String(e));
-      developerLog('列表请求异常', { source: options.reason || 'list', error: debugError(e), durationMs: Date.now() - startedAt });
+      console.warn('[鑷姩璇婃柇] 鍒楄〃鍗忚鏌ヨ澶辫触', String(e));
+      developerLog('鍒楄〃璇锋眰寮傚父', { source: options.reason || 'list', error: debugError(e), durationMs: Date.now() - startedAt });
       return [];
     }
   }
@@ -869,7 +828,7 @@
   async function findRowRecordByApi(d) {
     try {
       const records = await fetchRadiationRecords({ match: d, pageSize: 20, timeoutMs: 4500 });
-      const patientName = norm(d.patient).split(/门诊|急诊|住院|体检/)[0];
+      const patientName = norm(d.patient).split(/闂ㄨ瘖|鎬ヨ瘖|浣忛櫌|浣撴/)[0];
       const score = record => {
         let n = 0;
         if (d.applicationNo && [record.applyNo, record.applicationNo].some(x => norm(x) === norm(d.applicationNo))) n += 20;
@@ -905,41 +864,40 @@
       record
     };
     if (!isPendingReport(entryData)) {
-      d.__entryBlocked = entryData.locked ? '报告已锁定/占用' : '报告状态非待诊断';
-      developerLog('协议进入跳过', { ...debugCandidate(entryData), reason: d.__entryBlocked });
+      d.__entryBlocked = entryData.locked ? '鎶ュ憡宸查攣瀹?鍗犵敤' : '鎶ュ憡鐘舵€侀潪寰呰瘖鏂?;
+      developerLog('鍗忚杩涘叆璺宠繃', { ...debugCandidate(entryData), reason: d.__entryBlocked });
       return false;
     }
     if (!repUid) {
-      console.warn('[自动诊断] 当前行未取得报告编号，协议进入暂不可用，将尝试页面按钮');
-      developerLog('协议进入跳过', { ...debugCandidate(entryData), reason: '缺少记录编号' });
+      console.warn('[鑷姩璇婃柇] 褰撳墠琛屾湭鍙栧緱鎶ュ憡缂栧彿锛屽崗璁繘鍏ユ殏涓嶅彲鐢紝灏嗗皾璇曢〉闈㈡寜閽?);
+      developerLog('鍗忚杩涘叆璺宠繃', { ...debugCandidate(entryData), reason: '缂哄皯璁板綍缂栧彿' });
       return false;
     }
     const startedAt = Date.now();
-    developerLog('协议进入开始', { ...debugCandidate(entryData), reason: '校验允许进入' });
+    developerLog('鍗忚杩涘叆寮€濮?, { ...debugCandidate(entryData), reason: '鏍￠獙鍏佽杩涘叆' });
     try {
       await ensureSessionIdentity();
       const url = `/api/ct/rays/rep/assertAllowEnter?repUid=${encodeURIComponent(String(repUid))}`;
       const { response, payload } = await fetchJson(url, { method: 'GET', credentials: 'include', headers: { Accept: 'application/json' } }, 4500);
       const serverMessage = norm(payload?.message);
-      const lockedMessage = /锁定|占用|其他用户|诊断中|审核中/.test(serverMessage);
+      const lockedMessage = /閿佸畾|鍗犵敤|鍏朵粬鐢ㄦ埛|璇婃柇涓瓅瀹℃牳涓?.test(serverMessage);
       const protocolAllowed = protocolAllowsEntry(payload);
       if (!response.ok || payload?.code !== 200 || !protocolAllowed) {
-        console.warn('[自动诊断] 系统不允许进入诊断', { code: payload?.code, message: payload?.message });
-        if (lockedMessage || (response.ok && payload?.code === 200 && payload?.data !== undefined && !protocolAllowed)) d.__entryBlocked = lockedMessage ? '报告已锁定/占用' : '业务校验未允许';
-        developerLog('协议进入拒绝', { ...debugCandidate(entryData), code: payload?.code ?? null, reason: lockedMessage ? '报告已锁定/占用' : '业务校验拒绝', durationMs: Date.now() - startedAt });
+        console.warn('[鑷姩璇婃柇] 绯荤粺涓嶅厑璁歌繘鍏ヨ瘖鏂?, { code: payload?.code, message: payload?.message });
+        if (lockedMessage || (response.ok && payload?.code === 200 && payload?.data !== undefined && !protocolAllowed)) d.__entryBlocked = lockedMessage ? '鎶ュ憡宸查攣瀹?鍗犵敤' : '涓氬姟鏍￠獙鏈厑璁?;
+        developerLog('鍗忚杩涘叆鎷掔粷', { ...debugCandidate(entryData), code: payload?.code ?? null, reason: lockedMessage ? '鎶ュ憡宸查攣瀹?鍗犵敤' : '涓氬姟鏍￠獙鎷掔粷', durationMs: Date.now() - startedAt });
         return false;
       }
       const applyOrgCode = record?.applyOrgCode || record?.applyOrg || d?.row?.dataset?.applyOrgCode || '';
       const query = new URLSearchParams({ id: String(repUid) });
       if (applyOrgCode) query.set('applyOrgCode', String(applyOrgCode));
-      console.info('[自动诊断] 协议校验通过，打开诊断页', { hasReportId: true });
-      developerLog('协议进入成功', { ...debugCandidate(entryData), durationMs: Date.now() - startedAt });
-      // 直接使用业务路由，诊断页会按系统原流程继续获取并锁定记录。
-      pageWindow().location.href = `/radiation/report?${query.toString()}`;
+      console.info('[鑷姩璇婃柇] 鍗忚鏍￠獙閫氳繃锛屾墦寮€璇婃柇椤?, { hasReportId: true });
+      developerLog('鍗忚杩涘叆鎴愬姛', { ...debugCandidate(entryData), durationMs: Date.now() - startedAt });
+      // 鐩存帴浣跨敤涓氬姟璺敱锛岃瘖鏂〉浼氭寜绯荤粺鍘熸祦绋嬬户缁幏鍙栧苟閿佸畾璁板綍銆?      pageWindow().location.href = `/radiation/report?${query.toString()}`;
       return true;
     } catch (e) {
-      console.warn('[自动诊断] 协议进入失败，将尝试页面按钮', { error: String(e) });
-      developerLog('协议进入异常', { ...debugCandidate(entryData), error: debugError(e), durationMs: Date.now() - startedAt });
+      console.warn('[鑷姩璇婃柇] 鍗忚杩涘叆澶辫触锛屽皢灏濊瘯椤甸潰鎸夐挳', { error: String(e) });
+      developerLog('鍗忚杩涘叆寮傚父', { ...debugCandidate(entryData), error: debugError(e), durationMs: Date.now() - startedAt });
       return false;
     }
   }
@@ -955,11 +913,11 @@
   async function enterDiagnosis(d) {
     if (entryRunning) return false;
     if (d?.__entryBlocked) {
-      developerLog('进入前硬门禁拒绝', { ...debugCandidate(d), reason: d.__entryBlocked });
+      developerLog('杩涘叆鍓嶇‖闂ㄧ鎷掔粷', { ...debugCandidate(d), reason: d.__entryBlocked });
       return false;
     }
     if (!isPendingReport(d)) {
-      developerLog('进入前硬门禁拒绝', { ...debugCandidate(d), reason: d?.locked ? '报告已锁定/占用' : '报告状态非待诊断' });
+      developerLog('杩涘叆鍓嶇‖闂ㄧ鎷掔粷', { ...debugCandidate(d), reason: d?.locked ? '鎶ュ憡宸查攣瀹?鍗犵敤' : '鎶ュ憡鐘舵€侀潪寰呰瘖鏂? });
       return false;
     }
     entryRunning = true;
@@ -980,7 +938,7 @@
     if (!rules.length) return [];
     return [...new Set(rules.map(value => {
       const text = norm(value);
-      return text === '待诊断' ? String(config.pendingStatusValue || REPORT_STATUS_CODES[text]) : (REPORT_STATUS_CODES[text] || text);
+      return text === '寰呰瘖鏂? ? String(config.pendingStatusValue || REPORT_STATUS_CODES[text]) : (REPORT_STATUS_CODES[text] || text);
     }).filter(Boolean))];
   }
   function statusProbePayload() {
@@ -1008,30 +966,30 @@
   }
   async function processRemoteRecords(records) {
     if (config.entryMode === 'click') return false;
-    developerLog('列表候选处理', { source: 'remote-list', count: Array.isArray(records) ? records.length : 0 });
+    developerLog('鍒楄〃鍊欓€夊鐞?, { source: 'remote-list', count: Array.isArray(records) ? records.length : 0 });
     const orderedRecords = [...(records || [])].map(record => ({ record, data: recordData(record) })).filter(x => x.data).sort((a, b) => candidatePriority(b.data) - candidatePriority(a.data));
     for (const { record, data: prebuilt } of orderedRecords) {
       const d = prebuilt;
       if (!d) {
-        developerLog('候选无效', { source: 'remote-list', reason: '无法解析记录' });
+        developerLog('鍊欓€夋棤鏁?, { source: 'remote-list', reason: '鏃犳硶瑙ｆ瀽璁板綍' });
         continue;
       }
       const reasons = matchFailureReasons(d);
       if (dataSeen(d)) {
-        developerLog('候选跳过', { ...debugCandidate(d, { source: 'remote-list' }), reason: '已处理' });
+        developerLog('鍊欓€夎烦杩?, { ...debugCandidate(d, { source: 'remote-list' }), reason: '宸插鐞? });
         continue;
       }
       if (reasons.length) {
-        developerLog('候选过滤', { ...debugCandidate(d, { source: 'remote-list' }), reason: '规则不匹配', failedRules: reasons });
+        developerLog('鍊欓€夎繃婊?, { ...debugCandidate(d, { source: 'remote-list' }), reason: '瑙勫垯涓嶅尮閰?, failedRules: reasons });
         continue;
       }
-      developerLog('候选命中', { ...debugCandidate(d, { source: 'remote-list' }), reason: '规则通过' });
+      developerLog('鍊欓€夊懡涓?, { ...debugCandidate(d, { source: 'remote-list' }), reason: '瑙勫垯閫氳繃' });
       if (!await enterDiagnosis(d)) {
-        developerLog('候选进入失败', { ...debugCandidate(d, { source: 'remote-list' }), reason: '协议和页面入口均未成功' });
+        developerLog('鍊欓€夎繘鍏ュけ璐?, { ...debugCandidate(d, { source: 'remote-list' }), reason: '鍗忚鍜岄〉闈㈠叆鍙ｅ潎鏈垚鍔? });
         continue;
       }
       rememberData(d);
-      console.info('[自动诊断] 轻量探测命中，协议进入诊断：', { exam: d.exam, modality: d.modality });
+      console.info('[鑷姩璇婃柇] 杞婚噺鎺㈡祴鍛戒腑锛屽崗璁繘鍏ヨ瘖鏂細', { exam: d.exam, modality: d.modality });
       await new Promise(resolve => setTimeout(resolve, Number(config.clickDelayMs) || 0));
       return true;
     }
@@ -1044,25 +1002,22 @@
     const normalCooldown = Math.max(10000, Number(config.listHeartbeatMs) || 15000);
     const cooldown = force ? 3000 : normalCooldown;
     if (listRefreshRunning || now - lastListFetchAt < cooldown) {
-      // 保留 WebSocket 携带的精确线索，待当前请求结束或冷却结束后再按该线索取列表。
-      if (match) queuedRealtimeMatch = match;
-      developerLog('列表请求排队', { source: options.reason || 'list', reason: listRefreshRunning ? '已有请求进行中' : '冷却保护', waitMs: Math.max(0, cooldown - (now - lastListFetchAt)), narrow: !!match });
+      // 淇濈暀 WebSocket 鎼哄甫鐨勭簿纭嚎绱紝寰呭綋鍓嶈姹傜粨鏉熸垨鍐峰嵈缁撴潫鍚庡啀鎸夎绾跨储鍙栧垪琛ㄣ€?      if (match) queuedRealtimeMatch = match;
+      developerLog('鍒楄〃璇锋眰鎺掗槦', { source: options.reason || 'list', reason: listRefreshRunning ? '宸叉湁璇锋眰杩涜涓? : '鍐峰嵈淇濇姢', waitMs: Math.max(0, cooldown - (now - lastListFetchAt)), narrow: !!match });
       return false;
     }
     listRefreshRunning = true;
     lastListFetchAt = now;
     try {
-      // 有精确线索时缩小请求范围；没有线索才取常规的最近列表。
-      const records = await fetchRadiationRecords({ match, pageSize: match ? 20 : 30, timeoutMs: 5000, reason: options.reason || 'list' });
+      // 鏈夌簿纭嚎绱㈡椂缂╁皬璇锋眰鑼冨洿锛涙病鏈夌嚎绱㈡墠鍙栧父瑙勭殑鏈€杩戝垪琛ㄣ€?      const records = await fetchRadiationRecords({ match, pageSize: match ? 20 : 30, timeoutMs: 5000, reason: options.reason || 'list' });
       return await processRemoteRecords(records);
     } finally {
       listRefreshRunning = false;
     }
   }
   async function probeStatus() {
-    // 协议探测不依赖表格 DOM，隐藏标签页也继续工作；浏览器冻结页面时则由 WebSocket
-    // 消息在恢复后补上。DOM 扫描仍由 scan() 自己限制为前台执行。
-    if (!config.enabled || config.entryMode === 'click' || probeRunning || pageWindow().location.pathname !== '/radiation') return;
+    // 鍗忚鎺㈡祴涓嶄緷璧栬〃鏍?DOM锛岄殣钘忔爣绛鹃〉涔熺户缁伐浣滐紱娴忚鍣ㄥ喕缁撻〉闈㈡椂鍒欑敱 WebSocket
+    // 娑堟伅鍦ㄦ仮澶嶅悗琛ヤ笂銆侱OM 鎵弿浠嶇敱 scan() 鑷繁闄愬埗涓哄墠鍙版墽琛屻€?    if (!config.enabled || config.entryMode === 'click' || probeRunning || pageWindow().location.pathname !== '/radiation') return;
     if (!accountAllowed()) return;
     probeRunning = true;
     const startedAt = Date.now();
@@ -1081,12 +1036,12 @@
       statusProbeFailures = 0;
       const heartbeatMs = Math.max(10000, Number(config.listHeartbeatMs) || 15000);
       const heartbeatDue = Date.now() - lastListFetchAt >= heartbeatMs;
-      developerLog('状态探测结果', { ok: true, changed, heartbeatDue, durationMs: Date.now() - startedAt });
+      developerLog('鐘舵€佹帰娴嬬粨鏋?, { ok: true, changed, heartbeatDue, durationMs: Date.now() - startedAt });
       if (changed || heartbeatDue) await refreshRemoteCandidates({ reason: changed ? 'status-change' : 'heartbeat' });
     } catch (e) {
       statusProbeFailures = Math.min(statusProbeFailures + 1, 4);
-      console.debug('[自动诊断] 轻量状态探测失败，稍后退避重试', String(e));
-      developerLog('状态探测失败', { ok: false, error: debugError(e), failureCount: statusProbeFailures, durationMs: Date.now() - startedAt });
+      console.debug('[鑷姩璇婃柇] 杞婚噺鐘舵€佹帰娴嬪け璐ワ紝绋嶅悗閫€閬块噸璇?, String(e));
+      developerLog('鐘舵€佹帰娴嬪け璐?, { ok: false, error: debugError(e), failureCount: statusProbeFailures, durationMs: Date.now() - startedAt });
       scheduleAutoQueryFallback();
     } finally {
       probeRunning = false;
@@ -1094,10 +1049,8 @@
   }
   function probeBaseMs() {
     const configured = Math.max(3000, Number(config.statusProbeMs) || 5000);
-    // WebSocket 最近有业务提示时，计数请求只做较低频健康兜底；长时间无提示再恢复配置频率。
-    if (lastRealtimeHintAt && Date.now() - lastRealtimeHintAt < 60000) return Math.max(15000, configured);
-    // 隐藏标签页只做低频计数兜底，实时性由同一条 WebSocket 连接负责，避免后台高频完整列表请求。
-    return document.visibilityState === 'hidden' ? Math.max(15000, configured) : configured;
+    // WebSocket 鏈€杩戞湁涓氬姟鎻愮ず鏃讹紝璁℃暟璇锋眰鍙仛杈冧綆棰戝仴搴峰厹搴曪紱闀挎椂闂存棤鎻愮ず鍐嶆仮澶嶉厤缃鐜囥€?    if (lastRealtimeHintAt && Date.now() - lastRealtimeHintAt < 60000) return Math.max(15000, configured);
+    // 闅愯棌鏍囩椤靛彧鍋氫綆棰戣鏁板厹搴曪紝瀹炴椂鎬х敱鍚屼竴鏉?WebSocket 杩炴帴璐熻矗锛岄伩鍏嶅悗鍙伴珮棰戝畬鏁村垪琛ㄨ姹傘€?    return document.visibilityState === 'hidden' ? Math.max(15000, configured) : configured;
   }
   function nextProbeDelay() {
     const base = probeBaseMs();
@@ -1120,16 +1073,15 @@
     if (realtimeRefreshTimer) return;
     const minGap = 3000;
     const delay = Math.max(0, minGap - (Date.now() - lastRealtimeRefreshAt));
-    developerLog('实时列表调度', { source: 'websocket', delayMs: delay, narrow: !!options.match });
+    developerLog('瀹炴椂鍒楄〃璋冨害', { source: 'websocket', delayMs: delay, narrow: !!options.match });
     realtimeRefreshTimer = setTimeout(async () => {
       realtimeRefreshTimer = null;
       lastRealtimeRefreshAt = Date.now();
       const match = queuedRealtimeMatch;
       queuedRealtimeMatch = null;
       await refreshRemoteCandidates({ force: true, reason: 'websocket-hint', match });
-      // 请求重叠或冷却保护时，refreshRemoteCandidates 会把线索放回队列；稍后重试，
-      // 既不丢实时事件，也不把列表接口变成高频轮询。
-      if (queuedRealtimeMatch) {
+      // 璇锋眰閲嶅彔鎴栧喎鍗翠繚鎶ゆ椂锛宺efreshRemoteCandidates 浼氭妸绾跨储鏀惧洖闃熷垪锛涚◢鍚庨噸璇曪紝
+      // 鏃笉涓㈠疄鏃朵簨浠讹紝涔熶笉鎶婂垪琛ㄦ帴鍙ｅ彉鎴愰珮棰戣疆璇€?      if (queuedRealtimeMatch) {
         const pending = queuedRealtimeMatch;
         queuedRealtimeMatch = null;
         setTimeout(() => queueRealtimeRefresh({ match: pending }), 500);
@@ -1151,9 +1103,9 @@
     const d = recordData(rawRecord);
     const recordId = d?.record?.repUid || d?.record?.reportUid || d?.record?.reportId || d?.record?.id || '';
     const hasIdentity = !!(d && (recordId || d.applicationNo || d.patient || d.applyTime || d.exam));
-    developerLog('实时推送收到', { ...debugCandidate(d), source: 'websocket', hasIdentity, hasRecordId: !!recordId });
+    developerLog('瀹炴椂鎺ㄩ€佹敹鍒?, { ...debugCandidate(d), source: 'websocket', hasIdentity, hasRecordId: !!recordId });
     if (!hasIdentity) {
-      developerLog('实时推送降级', { source: 'websocket', reason: '线索字段不足' });
+      developerLog('瀹炴椂鎺ㄩ€侀檷绾?, { source: 'websocket', reason: '绾跨储瀛楁涓嶈冻' });
       queueRealtimeRefresh();
       return;
     }
@@ -1163,25 +1115,23 @@
       try {
         const seenAlready = !!d && dataSeen(d);
         const failedRules = d ? matchFailureReasons(d) : [];
-        if (seenAlready) developerLog('候选跳过', { ...debugCandidate(d, { source: 'websocket' }), reason: '已处理' });
-        else if (d && failedRules.length) developerLog('候选过滤', { ...debugCandidate(d, { source: 'websocket' }), reason: '规则不匹配', failedRules });
-        else if (d && !recordId) developerLog('实时推送降级', { ...debugCandidate(d, { source: 'websocket' }), reason: '线索没有记录编号' });
+        if (seenAlready) developerLog('鍊欓€夎烦杩?, { ...debugCandidate(d, { source: 'websocket' }), reason: '宸插鐞? });
+        else if (d && failedRules.length) developerLog('鍊欓€夎繃婊?, { ...debugCandidate(d, { source: 'websocket' }), reason: '瑙勫垯涓嶅尮閰?, failedRules });
+        else if (d && !recordId) developerLog('瀹炴椂鎺ㄩ€侀檷绾?, { ...debugCandidate(d, { source: 'websocket' }), reason: '绾跨储娌℃湁璁板綍缂栧彿' });
         if (d && !seenAlready && !failedRules.length && recordId) {
           entered = await enterDiagnosis(d);
           if (entered) rememberData(d);
-          else developerLog('候选进入失败', { ...debugCandidate(d, { source: 'websocket' }), reason: '协议入口失败，等待窄列表兜底' });
+          else developerLog('鍊欓€夎繘鍏ュけ璐?, { ...debugCandidate(d, { source: 'websocket' }), reason: '鍗忚鍏ュ彛澶辫触锛岀瓑寰呯獎鍒楄〃鍏滃簳' });
         }
       } catch (e) {
-        console.debug('[自动诊断] 实时提示处理失败，转入列表兜底', String(e));
-        developerLog('实时推送处理异常', { ...debugCandidate(d), source: 'websocket', error: debugError(e) });
+        console.debug('[鑷姩璇婃柇] 瀹炴椂鎻愮ず澶勭悊澶辫触锛岃浆鍏ュ垪琛ㄥ厹搴?, String(e));
+        developerLog('瀹炴椂鎺ㄩ€佸鐞嗗紓甯?, { ...debugCandidate(d), source: 'websocket', error: debugError(e) });
       } finally {
         realtimeRecordRunning = false;
       }
     }
-    // 推送消息没有完整记录或协议进入失败时，按该条线索取一次窄列表，
-    // 不再从第一页的全量候选中盲目扫描。
-    if (!entered) queueRealtimeRefresh({ match: d });
-    else developerLog('实时推送进入成功', { ...debugCandidate(d), source: 'websocket' });
+    // 鎺ㄩ€佹秷鎭病鏈夊畬鏁磋褰曟垨鍗忚杩涘叆澶辫触鏃讹紝鎸夎鏉＄嚎绱㈠彇涓€娆＄獎鍒楄〃锛?    // 涓嶅啀浠庣涓€椤电殑鍏ㄩ噺鍊欓€変腑鐩茬洰鎵弿銆?    if (!entered) queueRealtimeRefresh({ match: d });
+    else developerLog('瀹炴椂鎺ㄩ€佽繘鍏ユ垚鍔?, { ...debugCandidate(d), source: 'websocket' });
   }
 
   let realtimeBridgeBound = false;
@@ -1269,7 +1219,7 @@
         root.appendChild(script);
         script.remove();
       } catch (e) {
-        console.debug('[自动诊断] 实时推送桥接安装失败，将使用轻量状态探测', String(e));
+        console.debug('[鑷姩璇婃柇] 瀹炴椂鎺ㄩ€佹ˉ鎺ュ畨瑁呭け璐ワ紝灏嗕娇鐢ㄨ交閲忕姸鎬佹帰娴?, String(e));
       }
     };
     if (document.documentElement) inject();
@@ -1286,47 +1236,45 @@
         const reasons = matchFailureReasons(d);
         if (config.developerMode && d.row) {
           const operator = diagnoseOperator(d.row);
-          developerLog('页面行状态', {
-            ...debugCandidate(d, { source: 'dom', reason: reasons[0] || '规则通过' }),
+          developerLog('椤甸潰琛岀姸鎬?, {
+            ...debugCandidate(d, { source: 'dom', reason: reasons[0] || '瑙勫垯閫氳繃' }),
             diagnoseEntryFound: !!operator,
             diagnoseEntryDisabled: !!operator && operatorDisabled(operator),
             operatorCount: d.row.querySelectorAll(config.selectors.operatorItems).length
           });
         }
         if (dataSeen(d)) {
-          developerLog('候选跳过', { ...debugCandidate(d, { source: 'dom' }), reason: '已处理' });
+          developerLog('鍊欓€夎烦杩?, { ...debugCandidate(d, { source: 'dom' }), reason: '宸插鐞? });
           continue;
         }
         if (reasons.length) {
-          developerLog('候选过滤', { ...debugCandidate(d, { source: 'dom' }), reason: '规则不匹配', failedRules: reasons });
+          developerLog('鍊欓€夎繃婊?, { ...debugCandidate(d, { source: 'dom' }), reason: '瑙勫垯涓嶅尮閰?, failedRules: reasons });
           continue;
         }
-        developerLog('候选命中', { ...debugCandidate(d, { source: 'dom' }), reason: '规则通过' });
-        // 只有真正找到可点击的诊断入口后才记入 seen；按钮暂时禁用时下一轮继续尝试。
-        if (!await enterDiagnosis(d)) {
-          developerLog('候选进入失败', { ...debugCandidate(d, { source: 'dom' }), reason: '协议和页面入口均未成功' });
+        developerLog('鍊欓€夊懡涓?, { ...debugCandidate(d, { source: 'dom' }), reason: '瑙勫垯閫氳繃' });
+        // 鍙湁鐪熸鎵惧埌鍙偣鍑荤殑璇婃柇鍏ュ彛鍚庢墠璁板叆 seen锛涙寜閽殏鏃剁鐢ㄦ椂涓嬩竴杞户缁皾璇曘€?        if (!await enterDiagnosis(d)) {
+          developerLog('鍊欓€夎繘鍏ュけ璐?, { ...debugCandidate(d, { source: 'dom' }), reason: '鍗忚鍜岄〉闈㈠叆鍙ｅ潎鏈垚鍔? });
           continue;
         }
         rememberData(d);
-        console.info('[自动诊断] 命中过滤规则，打开诊断：', { age: d.age, gender: d.gender, exam: d.exam, modality: d.modality });
-        developerLog('候选进入成功', { ...debugCandidate(d, { source: 'dom' }) });
+        console.info('[鑷姩璇婃柇] 鍛戒腑杩囨护瑙勫垯锛屾墦寮€璇婃柇锛?, { age: d.age, gender: d.gender, exam: d.exam, modality: d.modality });
+        developerLog('鍊欓€夎繘鍏ユ垚鍔?, { ...debugCandidate(d, { source: 'dom' }) });
         await new Promise(r => setTimeout(r, Number(config.clickDelayMs) || 700));
-        // 一次只打开一个，等待页面完成诊断跳转后下一轮再处理。
-        break;
+        // 涓€娆″彧鎵撳紑涓€涓紝绛夊緟椤甸潰瀹屾垚璇婃柇璺宠浆鍚庝笅涓€杞啀澶勭悊銆?        break;
       }
     } catch (e) {
-      console.error('[自动诊断] 扫描失败', e);
+      console.error('[鑷姩璇婃柇] 鎵弿澶辫触', e);
     } finally { running = false; }
   }
 
   function queryButton() {
-    return [...document.querySelectorAll('button')].find(button => norm(button.innerText || button.textContent) === '查询' && !button.disabled && button.getAttribute('aria-disabled') !== 'true');
+    return [...document.querySelectorAll('button')].find(button => norm(button.innerText || button.textContent) === '鏌ヨ' && !button.disabled && button.getAttribute('aria-disabled') !== 'true');
   }
 
   async function refreshPageListOnFocus(options = {}) {
     const automatic = options.automatic === true;
     if (!config.pageQueryRefresh) {
-      developerLog('页面查询跳过', { source: 'protocol-only', reason: '协议模式不触碰页面查询控件' });
+      developerLog('椤甸潰鏌ヨ璺宠繃', { source: 'protocol-only', reason: '鍗忚妯″紡涓嶈Е纰伴〉闈㈡煡璇㈡帶浠? });
       return false;
     }
     if (!config.enabled || pageQueryRunning || (!automatic && document.visibilityState !== 'visible') || pageWindow().location.pathname !== '/radiation') return false;
@@ -1337,11 +1285,11 @@
     pageQueryRunning = true;
     lastPageQueryAt = Date.now();
     const startedAt = Date.now();
-    developerLog('页面查询开始', { source: automatic ? 'protocol-fallback' : 'focus' });
+    developerLog('椤甸潰鏌ヨ寮€濮?, { source: automatic ? 'protocol-fallback' : 'focus' });
     try {
       button.click();
       await new Promise(resolve => setTimeout(resolve, 300));
-      developerLog('页面查询完成', { source: automatic ? 'protocol-fallback' : 'focus', durationMs: Date.now() - startedAt });
+      developerLog('椤甸潰鏌ヨ瀹屾垚', { source: automatic ? 'protocol-fallback' : 'focus', durationMs: Date.now() - startedAt });
       return true;
     } finally {
       pageQueryRunning = false;
@@ -1357,7 +1305,7 @@
       autoQueryFallbackTimer = null;
       if (statusProbeFailures < 2 || (lastRealtimeHintAt && Date.now() - lastRealtimeHintAt < 60000)) return;
       const refreshed = await refreshPageListOnFocus({ automatic: true });
-      developerLog('协议兜底查询', { source: 'protocol-fallback', refreshed, failureCount: statusProbeFailures });
+      developerLog('鍗忚鍏滃簳鏌ヨ', { source: 'protocol-fallback', refreshed, failureCount: statusProbeFailures });
     }, 15000);
   }
 
@@ -1369,12 +1317,11 @@
       pageQueryHeartbeatTimer = null;
       if (config.enabled && config.entryMode !== 'click' && pageWindow().location.pathname === '/radiation') {
         const stale = Date.now() - lastPageQueryAt >= interval;
-        // 实时提示刚到达时让 WebSocket 处理链路先完成；超过一个刷新周期仍无提示，
-        // 自动查询一次页面，避免列表长期停留在旧结果。
-        const websocketQuiet = !lastRealtimeHintAt || Date.now() - lastRealtimeHintAt >= 15000;
+        // 瀹炴椂鎻愮ず鍒氬埌杈炬椂璁?WebSocket 澶勭悊閾捐矾鍏堝畬鎴愶紱瓒呰繃涓€涓埛鏂板懆鏈熶粛鏃犳彁绀猴紝
+        // 鑷姩鏌ヨ涓€娆￠〉闈紝閬垮厤鍒楄〃闀挎湡鍋滅暀鍦ㄦ棫缁撴灉銆?        const websocketQuiet = !lastRealtimeHintAt || Date.now() - lastRealtimeHintAt >= 15000;
         if (stale && websocketQuiet) {
           const refreshed = await refreshPageListOnFocus({ automatic: true });
-          developerLog('自动查询心跳', { source: 'page-query-heartbeat', refreshed, intervalMs: interval });
+          developerLog('鑷姩鏌ヨ蹇冭烦', { source: 'page-query-heartbeat', refreshed, intervalMs: interval });
         }
       }
       schedulePageQueryHeartbeat(interval);
@@ -1398,8 +1345,7 @@
     statusProbeFailures = 0;
     lastRealtimeHintAt = 0;
     queuedRealtimeMatch = null;
-    // 先以当前页面表格为基线，避免打开脚本时因为“不限时间”一次性抢走旧记录。
-    lastListFetchAt = Date.now();
+    // 鍏堜互褰撳墠椤甸潰琛ㄦ牸涓哄熀绾匡紝閬垮厤鎵撳紑鑴氭湰鏃跺洜涓衡€滀笉闄愭椂闂粹€濅竴娆℃€ф姠璧版棫璁板綍銆?    lastListFetchAt = Date.now();
     lastRealtimeRefreshAt = 0;
     timer = setInterval(scan, Math.max(1000, Number(config.pollMs) || 2000));
     if (!visibilityBound) {
@@ -1423,28 +1369,28 @@
   }
   function saveProfiles(p) { GM_setValue(PROFILE_KEY, JSON.stringify(p, (k, v) => v instanceof RegExp ? { __regexp: v.source } : v)); }
   function listValue(v) { return Array.isArray(v) ? v.join(', ') : String(v || ''); }
-  function parseList(v) { return String(v || '').split(/[,，\n]/).map(norm).filter(Boolean); }
+  function parseList(v) { return String(v || '').split(/[,锛孿n]/).map(norm).filter(Boolean); }
   function esc(v) { return String(v ?? '').replace(/[&<>"']/g, x => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[x])); }
 
   async function runSelfCheck() {
     const checks = [];
     const path = pageWindow().location.pathname;
-    checks.push(`路由：${path}`);
-    checks.push(`配置：${config.enabled ? '启用' : '停用'} / 进入方式 ${config.entryMode}`);
-    checks.push(`页面行：${queryBodyRows().length}；账号门禁：${accountAllowed() ? '通过' : '未通过'}`);
-    checks.push(`权重：检查项目 ${parseWeights(config.examWeights).size} 项，机构 ${parseWeights(config.institutionWeights).size} 项`);
-    checks.push(`年龄：${config.age?.unlimited ? '不限' : `${config.age?.min ?? ''}-${config.age?.max ?? ''}`}`);
+    checks.push(`璺敱锛?{path}`);
+    checks.push(`閰嶇疆锛?{config.enabled ? '鍚敤' : '鍋滅敤'} / 杩涘叆鏂瑰紡 ${config.entryMode}`);
+    checks.push(`椤甸潰琛岋細${queryBodyRows().length}锛涜处鍙烽棬绂侊細${accountAllowed() ? '閫氳繃' : '鏈€氳繃'}`);
+    checks.push(`鏉冮噸锛氭鏌ラ」鐩?${parseWeights(config.examWeights).size} 椤癸紝鏈烘瀯 ${parseWeights(config.institutionWeights).size} 椤筦);
+    checks.push(`骞撮緞锛?{config.age?.unlimited ? '涓嶉檺' : `${config.age?.min ?? ''}-${config.age?.max ?? ''}`}`);
     if (path === '/radiation') {
       try {
         const result = await fetchJson('/api/admin/user/info', { method: 'GET', credentials: 'include', headers: { Accept: 'application/json' } }, 5000);
-        checks.push(`会话：${result.payload?.code === 200 ? '有效' : `业务码 ${result.payload?.code ?? '未知'}`}`);
-      } catch (e) { checks.push(`会话：请求失败（${String(e.message || e).slice(0, 80)}）`); }
+        checks.push(`浼氳瘽锛?{result.payload?.code === 200 ? '鏈夋晥' : `涓氬姟鐮?${result.payload?.code ?? '鏈煡'}`}`);
+      } catch (e) { checks.push(`浼氳瘽锛氳姹傚け璐ワ紙${String(e.message || e).slice(0, 80)}锛塦); }
       try {
         const result = await fetchJson('/api/ct/rays/rep/statusNum', { method: 'POST', credentials: 'include', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify(statusProbePayload()) }, 5000);
-        checks.push(`状态协议：${result.payload?.code === 200 ? '可用' : `业务码 ${result.payload?.code ?? '未知'}`}`);
-      } catch (e) { checks.push(`状态协议：请求失败（${String(e.message || e).slice(0, 80)}）`); }
+        checks.push(`鐘舵€佸崗璁細${result.payload?.code === 200 ? '鍙敤' : `涓氬姟鐮?${result.payload?.code ?? '鏈煡'}`}`);
+      } catch (e) { checks.push(`鐘舵€佸崗璁細璇锋眰澶辫触锛?{String(e.message || e).slice(0, 80)}锛塦); }
     }
-    developerLog('脚本自检', { source: 'self-check', checkCount: checks.length, route: path }, { force: true });
+    developerLog('鑴氭湰鑷', { source: 'self-check', checkCount: checks.length, route: path }, { force: true });
     return checks.join('\n');
   }
 
@@ -1455,25 +1401,25 @@
     box.id = 'jx-auto-diagnose-panel';
     box.style.cssText = 'position:fixed;z-index:2147483647;left:50%;top:50%;transform:translate(-50%,-50%);width:min(560px,calc(100vw - 32px));max-height:calc(100vh - 32px);display:flex;flex-direction:column;overflow:hidden;background:#fff;color:#1f2937;border:1px solid #409eff;border-radius:10px;padding:0;box-shadow:0 12px 42px #0005;font:13px/1.45 Segoe UI,Microsoft Yahei,sans-serif';
     box.innerHTML = `
-      <div class="jx-panel-header" style="padding:12px 14px;background:linear-gradient(135deg,#409eff,#67c23a);color:white;display:flex;justify-content:space-between;align-items:center"><b style="font-size:15px">自动诊断设置</b><button type="button" data-a="close" aria-label="关闭设置" title="关闭设置" style="border:0;background:#ffffff33;color:white;border-radius:6px;padding:2px 10px;font-size:18px;line-height:1.25;cursor:pointer">×</button></div>
+      <div class="jx-panel-header" style="padding:12px 14px;background:linear-gradient(135deg,#409eff,#67c23a);color:white;display:flex;justify-content:space-between;align-items:center"><b style="font-size:15px">鑷姩璇婃柇璁剧疆</b><button type="button" data-a="close" aria-label="鍏抽棴璁剧疆" title="鍏抽棴璁剧疆" style="border:0;background:#ffffff33;color:white;border-radius:6px;padding:2px 10px;font-size:18px;line-height:1.25;cursor:pointer">脳</button></div>
       <div class="jx-panel-content" style="padding:10px 14px;overflow:auto;min-height:0;flex:1 1 auto">
-        <div style="display:flex;gap:6px;align-items:center;margin-bottom:9px"><select data-f="profile" style="flex:1;padding:5px"></select><button data-a="loadProfile">切换</button><input data-f="profileName" placeholder="方案名" style="width:90px;padding:5px"><button data-a="saveProfile">保存方案</button><button data-a="deleteProfile">删除</button></div>
-        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><label><input type="checkbox" data-f="enabled"> 启用自动打开</label><label>本地扫描 <input data-f="pollMs" type="number" min="1000" step="500" style="width:70px"> ms</label><label>状态探测 <input data-f="statusProbeMs" type="number" min="3000" step="1000" style="width:70px"> ms</label><label>列表补偿 <input data-f="listHeartbeatMs" type="number" min="10000" step="1000" style="width:80px"> ms</label><label>操作延迟 <input data-f="clickDelayMs" type="number" min="0" style="width:60px"> ms</label><label>进入方式 <select data-f="entryMode" style="width:auto"><option value="protocol-first">协议优先（失败回退点击）</option><option value="protocol-only">仅协议</option><option value="click">页面点击</option></select></label><label><input type="checkbox" data-f="pageQueryRefresh"> 允许脚本点击查询</label></div>
-        <small style="display:block;color:#909399;margin:-3px 0 7px">候选发现优先使用 WebSocket、状态计数和只读列表协议；默认每个列表补偿周期同步一次当前筛选条件下的可见表格，不会修改报告状态复选框。</small>
-        <fieldset><legend>开发者模式</legend><div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap"><label class="jx-dev-toggle"><input type="checkbox" data-f="developerMode"> 开启开发者模式</label><button type="button" data-a="selfCheck">运行自检</button><button type="button" data-a="copyDebug">复制最近诊断记录</button><button type="button" data-a="clearDebug">清空记录</button><span data-a="debugState" style="color:#909399">当前关闭</span></div><small style="color:#909399">默认关闭。自检只读当前页面、登录会话和状态协议，不修改报告状态；诊断记录不记录患者姓名、申请单号、报告编号或认证信息。</small></fieldset>
-        <fieldset><legend>登录账号</legend><div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap"><span>当前账号：<b data-a="currentAccount">读取中</b></span><button type="button" data-a="useCurrentAccount">仅允许当前账号</button><button type="button" data-a="clearAccountLimit">清空限制</button></div><label>允许自动诊断的账号（留空不限）<input data-f="allowedAccounts" placeholder="可填账号编号或登录名，多个用逗号分隔"></label><small style="color:#909399">支持账号编号和登录名，例如账号编号或登录名；留空时所有登录账号都启用。</small><div style="margin-top:8px;padding-top:7px;border-top:1px dashed #dcdfe6"><label><input type="checkbox" data-f="directLoginEnabled"> 未登录时启用协议登录</label><label>协议登录账号<input data-f="directLoginUsername" autocomplete="username" placeholder="账号编号"></label><div style="display:flex;gap:6px;margin-top:5px"><button type="button" data-a="directLoginNow">立即协议登录</button></div><small style="color:#909399">密码只在点击登录时临时输入，不写入配置。验证码显示在弹窗中，直接点击完成。</small></div></fieldset>
-        <fieldset><legend>报告/影像状态</legend><div class="jx-checks" data-group="reportStatuses"></div><div class="jx-checks" data-group="imageStatuses"></div></fieldset>
-        <fieldset><legend>患者信息</legend><div class="jx-checks" data-group="encounterTypes"></div><div class="jx-checks" data-group="gender"></div><label class="jx-check"><input type="checkbox" data-f="ageUnlimited"> 年龄不限</label><div class="jx-grid"><label>年龄从<input data-f="ageMin" type="number"></label><label>年龄到<input data-f="ageMax" type="number"></label><label>姓名包含<input data-f="patientNameContains"></label><label>申请单号包含<input data-f="applicationNoContains"></label></div></fieldset>
-        <fieldset><legend>检查与机构</legend><div class="jx-checks" data-group="modalities"></div><div class="jx-checks" data-group="applyInstitution"></div><div class="jx-checks" data-group="examNames"></div><div class="jx-exam-head"><span>其他检查项目</span><button type="button" data-a="refreshExamOptions" title="从当前列表更新全部可勾选项目">更新所有可选项目</button></div><div class="jx-checks" data-group="examNamesExtra"></div><small style="color:#909399">检查项目勾选“不限”即可匹配全部项目；权重越大越优先，格式为“项目=权重”，每行一项。</small><label>检查项目权重<textarea data-f="examWeights" rows="4" placeholder="头颅平扫=100&#10;肋骨平扫=10"></textarea></label><label>申请机构权重<textarea data-f="institutionWeights" rows="3" placeholder="机构名称=权重"></textarea></label><label class="jx-check"><input type="checkbox" data-f="preliminaryReportFirst"> 有结论的初写报告优先</label><small style="color:#909399">只识别结论字段；描述、备注不会被当作结论。没有结论的记录仍可处理，只是排序靠后。</small><div class="jx-grid"><label>检查部位最少数量<select data-f="siteMin"><option value="">不限</option><option value="1">1 个</option><option value="2">2 个</option><option value="3">3 个</option><option value="4">4 个</option><option value="5">5 个</option></select></label><label>检查部位最多数量<select data-f="siteMax"><option value="">不限</option><option value="1">1 个</option><option value="2">2 个</option><option value="3">3 个</option><option value="4">4 个</option><option value="5">5 个</option></select></label></div><label>审核/诊断医生（留空不限）<input data-f="auditDoctors"></label></fieldset>
-        <fieldset><legend>申请时间</legend><div class="jx-grid"><label>快捷范围<select data-f="applicationTimeMode"><option value="window">最近 5–30 分钟</option><option value="all">不限</option><option value="today">当天</option><option value="recent">最近 N 天</option><option value="fromTime">当天从指定时间</option></select></label><label>最早分钟<input data-f="applicationTimeMin" type="number" min="0" step="1"></label><label>最晚分钟<input data-f="applicationTimeMax" type="number" min="1" step="1"></label><label>最近天数<input data-f="applicationTimeDays" type="number" min="0" step="1"></label><label>开始时间<input data-f="applicationTimeStart" type="time"></label></div><small style="color:#909399">“最近 5–30 分钟”表示 5 分钟内不处理，超过 30 分钟也不处理。</small></fieldset>
-        <details><summary>诊断/审核时间（通常不用，默认不限）</summary><div class="jx-grid"><label>模式<select data-f="diagnosisTimeMode"><option value="all">不限</option><option value="today">当天</option><option value="recent">最近 N 天</option><option value="fromTime">当天从指定时间</option></select></label><label>最近天数<input data-f="diagnosisTimeDays" type="number" min="0"></label><label>开始时间<input data-f="diagnosisTimeStart" type="time"></label></div></details>
-        <details><summary>高级：表格选择器与操作按钮</summary><label>诊断操作图标序号<input data-f="diagnoseOperatorIndex" type="number" min="0" style="width:60px"></label><label>待诊断状态值<input data-f="pendingStatusValue"></label><label>表格行选择器<input data-f="bodyRows"></label><label>操作项选择器<input data-f="operatorItems"></label></details>
-        <div class="jx-panel-actions" style="display:flex;gap:7px;margin-top:10px"><button type="button" data-a="apply" style="background:#409eff;color:white;border:0;border-radius:4px;padding:7px 14px">应用并保存</button><button type="button" data-a="reset">恢复默认</button><button type="button" data-a="export">导出配置</button><button type="button" data-a="import">导入配置</button><span data-a="msg" style="color:#67c23a;align-self:center"></span></div>
+        <div style="display:flex;gap:6px;align-items:center;margin-bottom:9px"><select data-f="profile" style="flex:1;padding:5px"></select><button data-a="loadProfile">鍒囨崲</button><input data-f="profileName" placeholder="鏂规鍚? style="width:90px;padding:5px"><button data-a="saveProfile">淇濆瓨鏂规</button><button data-a="deleteProfile">鍒犻櫎</button></div>
+        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><label><input type="checkbox" data-f="enabled"> 鍚敤鑷姩鎵撳紑</label><label>鏈湴鎵弿 <input data-f="pollMs" type="number" min="1000" step="500" style="width:70px"> ms</label><label>鐘舵€佹帰娴?<input data-f="statusProbeMs" type="number" min="3000" step="1000" style="width:70px"> ms</label><label>鍒楄〃琛ュ伩 <input data-f="listHeartbeatMs" type="number" min="10000" step="1000" style="width:80px"> ms</label><label>鎿嶄綔寤惰繜 <input data-f="clickDelayMs" type="number" min="0" style="width:60px"> ms</label><label>杩涘叆鏂瑰紡 <select data-f="entryMode" style="width:auto"><option value="protocol-first">鍗忚浼樺厛锛堝け璐ュ洖閫€鐐瑰嚮锛?/option><option value="protocol-only">浠呭崗璁?/option><option value="click">椤甸潰鐐瑰嚮</option></select></label><label><input type="checkbox" data-f="pageQueryRefresh"> 鍏佽鑴氭湰鐐瑰嚮鏌ヨ</label></div>
+        <small style="display:block;color:#909399;margin:-3px 0 7px">鍊欓€夊彂鐜颁紭鍏堜娇鐢?WebSocket銆佺姸鎬佽鏁板拰鍙鍒楄〃鍗忚锛涢粯璁ゆ瘡涓垪琛ㄨˉ鍋垮懆鏈熷悓姝ヤ竴娆″綋鍓嶇瓫閫夋潯浠朵笅鐨勫彲瑙佽〃鏍硷紝涓嶄細淇敼鎶ュ憡鐘舵€佸閫夋銆?/small>
+        <fieldset><legend>寮€鍙戣€呮ā寮?/legend><div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap"><label class="jx-dev-toggle"><input type="checkbox" data-f="developerMode"> 寮€鍚紑鍙戣€呮ā寮?/label><button type="button" data-a="selfCheck">杩愯鑷</button><button type="button" data-a="copyDebug">澶嶅埗鏈€杩戣瘖鏂褰?/button><button type="button" data-a="clearDebug">娓呯┖璁板綍</button><span data-a="debugState" style="color:#909399">褰撳墠鍏抽棴</span></div><small style="color:#909399">榛樿鍏抽棴銆傝嚜妫€鍙褰撳墠椤甸潰銆佺櫥褰曚細璇濆拰鐘舵€佸崗璁紝涓嶄慨鏀规姤鍛婄姸鎬侊紱璇婃柇璁板綍涓嶈褰曟偅鑰呭鍚嶃€佺敵璇峰崟鍙枫€佹姤鍛婄紪鍙锋垨璁よ瘉淇℃伅銆?/small></fieldset>
+        <fieldset><legend>鐧诲綍璐﹀彿</legend><div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap"><span>褰撳墠璐﹀彿锛?b data-a="currentAccount">璇诲彇涓?/b></span><button type="button" data-a="useCurrentAccount">浠呭厑璁稿綋鍓嶈处鍙?/button><button type="button" data-a="clearAccountLimit">娓呯┖闄愬埗</button></div><label>鍏佽鑷姩璇婃柇鐨勮处鍙凤紙鐣欑┖涓嶉檺锛?input data-f="allowedAccounts" placeholder="鍙～璐﹀彿缂栧彿鎴栫櫥褰曞悕锛屽涓敤閫楀彿鍒嗛殧"></label><small style="color:#909399">鏀寔璐﹀彿缂栧彿鍜岀櫥褰曞悕锛屼緥濡傝处鍙风紪鍙锋垨鐧诲綍鍚嶏紱鐣欑┖鏃舵墍鏈夌櫥褰曡处鍙烽兘鍚敤銆?/small><div style="margin-top:8px;padding-top:7px;border-top:1px dashed #dcdfe6"><label><input type="checkbox" data-f="directLoginEnabled"> 鏈櫥褰曟椂鍚敤鍗忚鐧诲綍</label><label>鍗忚鐧诲綍璐﹀彿<input data-f="directLoginUsername" autocomplete="username" placeholder="璐﹀彿缂栧彿"></label><div style="display:flex;gap:6px;margin-top:5px"><button type="button" data-a="directLoginNow">绔嬪嵆鍗忚鐧诲綍</button></div><small style="color:#909399">瀵嗙爜鍙湪鐐瑰嚮鐧诲綍鏃朵复鏃惰緭鍏ワ紝涓嶅啓鍏ラ厤缃€傞獙璇佺爜鏄剧ず鍦ㄥ脊绐椾腑锛岀洿鎺ョ偣鍑诲畬鎴愩€?/small></div></fieldset>
+        <fieldset><legend>鎶ュ憡/褰卞儚鐘舵€?/legend><div class="jx-checks" data-group="reportStatuses"></div><div class="jx-checks" data-group="imageStatuses"></div></fieldset>
+        <fieldset><legend>鎮ｈ€呬俊鎭?/legend><div class="jx-checks" data-group="encounterTypes"></div><div class="jx-checks" data-group="gender"></div><label class="jx-check"><input type="checkbox" data-f="ageUnlimited"> 骞撮緞涓嶉檺</label><div class="jx-grid"><label>骞撮緞浠?input data-f="ageMin" type="number"></label><label>骞撮緞鍒?input data-f="ageMax" type="number"></label><label>濮撳悕鍖呭惈<input data-f="patientNameContains"></label><label>鐢宠鍗曞彿鍖呭惈<input data-f="applicationNoContains"></label></div></fieldset>
+        <fieldset><legend>妫€鏌ヤ笌鏈烘瀯</legend><div class="jx-checks" data-group="modalities"></div><div class="jx-checks" data-group="applyInstitution"></div><div class="jx-checks" data-group="examNames"></div><div class="jx-exam-head"><span>鍏朵粬妫€鏌ラ」鐩?/span><button type="button" data-a="refreshExamOptions" title="浠庡綋鍓嶅垪琛ㄦ洿鏂板叏閮ㄥ彲鍕鹃€夐」鐩?>鏇存柊鎵€鏈夊彲閫夐」鐩?/button></div><div class="jx-checks" data-group="examNamesExtra"></div><small style="color:#909399">妫€鏌ラ」鐩嬀閫夆€滀笉闄愨€濆嵆鍙尮閰嶅叏閮ㄩ」鐩紱鏉冮噸瓒婂ぇ瓒婁紭鍏堬紝鏍煎紡涓衡€滈」鐩?鏉冮噸鈥濓紝姣忚涓€椤广€?/small><label>妫€鏌ラ」鐩潈閲?textarea data-f="examWeights" rows="4" placeholder="澶撮骞虫壂=100&#10;鑲嬮骞虫壂=10"></textarea></label><label>鐢宠鏈烘瀯鏉冮噸<textarea data-f="institutionWeights" rows="3" placeholder="鏈烘瀯鍚嶇О=鏉冮噸"></textarea></label><label class="jx-check"><input type="checkbox" data-f="preliminaryReportFirst"> 鏈夌粨璁虹殑鍒濆啓鎶ュ憡浼樺厛</label><small style="color:#909399">鍙瘑鍒粨璁哄瓧娈碉紱鎻忚堪銆佸娉ㄤ笉浼氳褰撲綔缁撹銆傛病鏈夌粨璁虹殑璁板綍浠嶅彲澶勭悊锛屽彧鏄帓搴忛潬鍚庛€?/small><div class="jx-grid"><label>妫€鏌ラ儴浣嶆渶灏戞暟閲?select data-f="siteMin"><option value="">涓嶉檺</option><option value="1">1 涓?/option><option value="2">2 涓?/option><option value="3">3 涓?/option><option value="4">4 涓?/option><option value="5">5 涓?/option></select></label><label>妫€鏌ラ儴浣嶆渶澶氭暟閲?select data-f="siteMax"><option value="">涓嶉檺</option><option value="1">1 涓?/option><option value="2">2 涓?/option><option value="3">3 涓?/option><option value="4">4 涓?/option><option value="5">5 涓?/option></select></label></div><label>瀹℃牳/璇婃柇鍖荤敓锛堢暀绌轰笉闄愶級<input data-f="auditDoctors"></label></fieldset>
+        <fieldset><legend>鐢宠鏃堕棿</legend><div class="jx-grid"><label>蹇嵎鑼冨洿<select data-f="applicationTimeMode"><option value="window">鏈€杩?5鈥?0 鍒嗛挓</option><option value="all">涓嶉檺</option><option value="today">褰撳ぉ</option><option value="recent">鏈€杩?N 澶?/option><option value="fromTime">褰撳ぉ浠庢寚瀹氭椂闂?/option></select></label><label>鏈€鏃╁垎閽?input data-f="applicationTimeMin" type="number" min="0" step="1"></label><label>鏈€鏅氬垎閽?input data-f="applicationTimeMax" type="number" min="1" step="1"></label><label>鏈€杩戝ぉ鏁?input data-f="applicationTimeDays" type="number" min="0" step="1"></label><label>寮€濮嬫椂闂?input data-f="applicationTimeStart" type="time"></label></div><small style="color:#909399">鈥滄渶杩?5鈥?0 鍒嗛挓鈥濊〃绀?5 鍒嗛挓鍐呬笉澶勭悊锛岃秴杩?30 鍒嗛挓涔熶笉澶勭悊銆?/small></fieldset>
+        <details><summary>璇婃柇/瀹℃牳鏃堕棿锛堥€氬父涓嶇敤锛岄粯璁や笉闄愶級</summary><div class="jx-grid"><label>妯″紡<select data-f="diagnosisTimeMode"><option value="all">涓嶉檺</option><option value="today">褰撳ぉ</option><option value="recent">鏈€杩?N 澶?/option><option value="fromTime">褰撳ぉ浠庢寚瀹氭椂闂?/option></select></label><label>鏈€杩戝ぉ鏁?input data-f="diagnosisTimeDays" type="number" min="0"></label><label>寮€濮嬫椂闂?input data-f="diagnosisTimeStart" type="time"></label></div></details>
+        <details><summary>楂樼骇锛氳〃鏍奸€夋嫨鍣ㄤ笌鎿嶄綔鎸夐挳</summary><label>璇婃柇鎿嶄綔鍥炬爣搴忓彿<input data-f="diagnoseOperatorIndex" type="number" min="0" style="width:60px"></label><label>寰呰瘖鏂姸鎬佸€?input data-f="pendingStatusValue"></label><label>琛ㄦ牸琛岄€夋嫨鍣?input data-f="bodyRows"></label><label>鎿嶄綔椤归€夋嫨鍣?input data-f="operatorItems"></label></details>
+        <div class="jx-panel-actions" style="display:flex;gap:7px;margin-top:10px"><button type="button" data-a="apply" style="background:#409eff;color:white;border:0;border-radius:4px;padding:7px 14px">搴旂敤骞朵繚瀛?/button><button type="button" data-a="reset">鎭㈠榛樿</button><button type="button" data-a="export">瀵煎嚭閰嶇疆</button><button type="button" data-a="import">瀵煎叆閰嶇疆</button><span data-a="msg" style="color:#67c23a;align-self:center"></span></div>
       </div>`;
     document.body.appendChild(box);
     const style = document.createElement('style'); style.textContent = '#jx-auto-diagnose-panel .jx-panel-header{position:sticky;top:0;z-index:3;flex:0 0 auto;box-shadow:0 1px 5px #0002}#jx-auto-diagnose-panel .jx-panel-content{overscroll-behavior:contain}#jx-auto-diagnose-panel .jx-panel-actions{position:sticky;bottom:0;z-index:2;background:#fff;padding:8px 0 2px;box-shadow:0 -1px 5px #0001}#jx-auto-diagnose-panel fieldset{border:1px solid #dcdfe6;border-radius:6px;margin:7px 0;padding:7px}#jx-auto-diagnose-panel legend{padding:0 4px;color:#409eff}#jx-auto-diagnose-panel label{display:block;margin:4px 0}#jx-auto-diagnose-panel input,#jx-auto-diagnose-panel select,#jx-auto-diagnose-panel textarea{box-sizing:border-box;padding:4px;border:1px solid #dcdfe6;border-radius:4px;margin-top:2px;width:100%;font:inherit}#jx-auto-diagnose-panel .jx-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 10px}#jx-auto-diagnose-panel .jx-checks{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;margin:4px 0}#jx-auto-diagnose-panel .jx-check{display:inline-flex;align-items:center;gap:3px;margin:0;color:#606266}#jx-auto-diagnose-panel .jx-check input{width:auto;margin:0}#jx-auto-diagnose-panel .jx-group-label{color:#909399;margin-right:3px}#jx-auto-diagnose-panel .jx-exam-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:7px;color:#909399}#jx-auto-diagnose-panel .jx-exam-head button{padding:3px 8px;color:#409eff;border-color:#b3d8ff;background:#ecf5ff}#jx-auto-diagnose-panel button{border:1px solid #c0c4cc;background:#fff;border-radius:4px;padding:5px 8px;cursor:pointer}#jx-auto-diagnose-panel button:focus-visible{outline:2px solid #409eff;outline-offset:1px}#jx-auto-diagnose-panel [data-a="close"]{min-width:34px;min-height:30px}#jx-auto-diagnose-panel .jx-dev-toggle{display:inline-flex;align-items:center;gap:4px;color:#e6a23c;font-weight:600}#jx-auto-diagnose-panel .jx-dev-toggle input{width:auto;margin:0}'; box.appendChild(style);
     const f = n => box.querySelector(`[data-f="${n}"]`);
-    const GROUPS = { reportStatuses: ['不限','待诊断','诊断中','待审核','审核中','已审核','已打印'], imageStatuses: ['不限','正常','异常'], encounterTypes: ['不限','门诊','急诊','住院','体检'], gender: ['不限','男','女'], modalities: ['不限','CT','MR','DR','DSA','乳腺'], examNames: ['不限', ...DEFAULT_CONFIG.examNames], examNamesExtra: [] };
+    const GROUPS = { reportStatuses: ['涓嶉檺','寰呰瘖鏂?,'璇婃柇涓?,'寰呭鏍?,'瀹℃牳涓?,'宸插鏍?,'宸叉墦鍗?], imageStatuses: ['涓嶉檺','姝ｅ父','寮傚父'], encounterTypes: ['涓嶉檺','闂ㄨ瘖','鎬ヨ瘖','浣忛櫌','浣撴'], gender: ['涓嶉檺','鐢?,'濂?], modalities: ['涓嶉檺','CT','MR','DR','DSA','涔宠吅'], examNames: ['涓嶉檺', ...DEFAULT_CONFIG.examNames], examNamesExtra: [] };
     function availableExamOptions() {
       const fromRows = queryBodyRows().flatMap(row => {
         const value = rowData(row).exam;
@@ -1486,22 +1432,22 @@
       for (const [name, baseOptions] of Object.entries(GROUPS)) {
         const options = name === 'examNamesExtra' ? availableExamOptions() : baseOptions;
         const host = box.querySelector(`[data-group="${name}"]`); if (!host) continue;
-        const label = {reportStatuses:'报告状态',imageStatuses:'影像状态',encounterTypes:'就诊类型',gender:'性别',modalities:'检查类型',examNames:'检查项目',examNamesExtra:'可选项目'}[name];
-        host.innerHTML = `<span class="jx-group-label">${label}：</span>` + options.map(x => `<label class="jx-check"><input type="checkbox" data-group-name="${name}" value="${esc(x)}"><span>${esc(x)}</span></label>`).join('');
+        const label = {reportStatuses:'鎶ュ憡鐘舵€?,imageStatuses:'褰卞儚鐘舵€?,encounterTypes:'灏辫瘖绫诲瀷',gender:'鎬у埆',modalities:'妫€鏌ョ被鍨?,examNames:'妫€鏌ラ」鐩?,examNamesExtra:'鍙€夐」鐩?}[name];
+        host.innerHTML = `<span class="jx-group-label">${label}锛?/span>` + options.map(x => `<label class="jx-check"><input type="checkbox" data-group-name="${name}" value="${esc(x)}"><span>${esc(x)}</span></label>`).join('');
       }
       const values = [...new Set([...(config.applyInstitution || []), ...queryBodyRows().map(rowData).map(d => d.institution).filter(Boolean)])];
       const host = box.querySelector('[data-group="applyInstitution"]');
-      if (host) host.innerHTML = '<span class="jx-group-label">申请机构：</span>' + ['不限', ...values].map(x => `<label class="jx-check"><input type="checkbox" data-group-name="applyInstitution" value="${esc(x)}"><span>${esc(x === '不限' ? '不限申请机构' : x)}</span></label>`).join('');
+      if (host) host.innerHTML = '<span class="jx-group-label">鐢宠鏈烘瀯锛?/span>' + ['涓嶉檺', ...values].map(x => `<label class="jx-check"><input type="checkbox" data-group-name="applyInstitution" value="${esc(x)}"><span>${esc(x === '涓嶉檺' ? '涓嶉檺鐢宠鏈烘瀯' : x)}</span></label>`).join('');
       box.querySelectorAll('input[data-group-name]').forEach(check => check.addEventListener('change', () => {
         const group = check.dataset.groupName;
         const peers = [...box.querySelectorAll(`input[data-group-name="${group}"]`)];
-        const unlimited = peers.find(item => item.value === '不限');
-        if (check.checked && check.value === '不限') peers.forEach(item => { if (item !== check) item.checked = false; });
-        if (check.checked && check.value !== '不限' && unlimited) unlimited.checked = false;
+        const unlimited = peers.find(item => item.value === '涓嶉檺');
+        if (check.checked && check.value === '涓嶉檺') peers.forEach(item => { if (item !== check) item.checked = false; });
+        if (check.checked && check.value !== '涓嶉檺' && unlimited) unlimited.checked = false;
       }));
     }
-    function setGroup(name, values) { const selected = new Set(values || []); box.querySelectorAll(`[data-group-name="${name}"]`).forEach(c => { c.checked = selected.has(c.value) || (c.value === '不限' && !values?.length); }); }
-    function getGroup(name) { const all = [...box.querySelectorAll(`[data-group-name="${name}"]:checked`)].map(x => x.value); return all.includes('不限') ? [] : all; }
+    function setGroup(name, values) { const selected = new Set(values || []); box.querySelectorAll(`[data-group-name="${name}"]`).forEach(c => { c.checked = selected.has(c.value) || (c.value === '涓嶉檺' && !values?.length); }); }
+    function getGroup(name) { const all = [...box.querySelectorAll(`[data-group-name="${name}"]:checked`)].map(x => x.value); return all.includes('涓嶉檺') ? [] : all; }
     function render() {
       drawGroups();
       f('enabled').checked = !!config.enabled; f('developerMode').checked = !!config.developerMode; f('pageQueryRefresh').checked = !!config.pageQueryRefresh; f('pollMs').value = config.pollMs; f('statusProbeMs').value = config.statusProbeMs || 5000; f('listHeartbeatMs').value = config.listHeartbeatMs || 15000; f('clickDelayMs').value = config.clickDelayMs;
@@ -1518,7 +1464,7 @@
       f('applicationTimeMode').value = config.applicationTime.mode; f('applicationTimeMin').value = config.applicationTime.minMinutes ?? 5; f('applicationTimeMax').value = config.applicationTime.maxMinutes ?? 30; f('applicationTimeDays').value = config.applicationTime.days ?? ''; f('applicationTimeStart').value = config.applicationTime.start || '00:00';
       f('diagnosisTimeMode').value = config.diagnosisTime.mode; f('diagnosisTimeDays').value = config.diagnosisTime.days ?? ''; f('diagnosisTimeStart').value = config.diagnosisTime.start || '00:00';
       f('diagnoseOperatorIndex').value = config.selectors.diagnoseOperatorIndex; f('pendingStatusValue').value = config.pendingStatusValue; f('bodyRows').value = config.selectors.bodyRows; f('operatorItems').value = config.selectors.operatorItems;
-      const ps = profiles(); f('profile').innerHTML = '<option value="">选择已保存方案</option>' + Object.keys(ps).sort().map(x => `<option>${esc(x)}</option>`).join('');
+      const ps = profiles(); f('profile').innerHTML = '<option value="">閫夋嫨宸蹭繚瀛樻柟妗?/option>' + Object.keys(ps).sort().map(x => `<option>${esc(x)}</option>`).join('');
     }
     function read() {
       config.enabled = f('enabled').checked; config.developerMode = f('developerMode').checked; config.pageQueryRefresh = f('pageQueryRefresh').checked; config.pollMs = Math.max(1000, Number(f('pollMs').value) || 2000); config.statusProbeMs = Math.max(3000, Number(f('statusProbeMs').value) || 5000); config.listHeartbeatMs = Math.max(10000, Number(f('listHeartbeatMs').value) || 15000); config.clickDelayMs = Number(f('clickDelayMs').value) || 0; config.entryMode = f('entryMode').value || 'protocol-first';
@@ -1531,51 +1477,51 @@
       config.pendingStatusValue = f('pendingStatusValue').value.trim() || '102501'; config.selectors.diagnoseOperatorIndex = Number(f('diagnoseOperatorIndex').value) || 0; config.selectors.bodyRows = f('bodyRows').value.trim() || DEFAULT_CONFIG.selectors.bodyRows; config.selectors.operatorItems = f('operatorItems').value.trim() || DEFAULT_CONFIG.selectors.operatorItems;
     }
     const msg = t => { const el = box.querySelector('[data-a="msg"]'); if (!el) return; el.textContent = t; setTimeout(() => { const current = box.querySelector('[data-a="msg"]'); if (current) current.textContent = ''; }, 1800); };
-    box.querySelector('[data-a="apply"]').onclick = () => { read(); saveConfig(); start(); msg('已保存并应用'); };
-    box.querySelector('[data-f="developerMode"]').onchange = () => { config.developerMode = f('developerMode').checked; const state = box.querySelector('[data-a="debugState"]'); if (state) state.textContent = developerModeStateText(); if (config.developerMode) developerLog('开发者模式开启', { source: 'settings' }, { force: true }); };
-    box.querySelector('[data-a="copyDebug"]').onclick = async () => { try { await navigator.clipboard?.writeText(developerLogText()); msg(debugEvents.length ? '诊断记录已复制' : '当前没有诊断记录'); } catch (_) { msg('复制失败，请打开控制台查看'); } };
-    box.querySelector('[data-a="clearDebug"]').onclick = () => { debugEvents.length = 0; debugLastAt.clear(); try { GM_setValue(DEBUG_STORAGE_KEY, []); } catch (_) {} const state = box.querySelector('[data-a="debugState"]'); if (state) state.textContent = developerModeStateText(); msg('诊断记录已清空'); };
-    box.querySelector('[data-a="selfCheck"]').onclick = async () => { msg('正在运行自检…'); const result = await runSelfCheck(); alert(result); msg('自检完成'); };
-    box.querySelector('[data-a="useCurrentAccount"]').onclick = () => { const identity = loginIdentity(); const value = identity.loginCode || identity.name; if (!value) return msg('当前账号暂未识别'); f('allowedAccounts').value = value; msg('已填入当前账号'); };
-    box.querySelector('[data-a="clearAccountLimit"]').onclick = () => { f('allowedAccounts').value = ''; msg('已清空账号限制'); };
-    box.querySelector('[data-a="directLoginNow"]').onclick = async () => { read(); saveConfig(); msg('正在协议登录…'); const ok = await ensureDirectLogin(); msg(ok ? '协议登录成功' : '协议登录未完成'); if (ok) { render(); start(); } };
+    box.querySelector('[data-a="apply"]').onclick = () => { read(); saveConfig(); start(); msg('宸蹭繚瀛樺苟搴旂敤'); };
+    box.querySelector('[data-f="developerMode"]').onchange = () => { config.developerMode = f('developerMode').checked; const state = box.querySelector('[data-a="debugState"]'); if (state) state.textContent = developerModeStateText(); if (config.developerMode) developerLog('寮€鍙戣€呮ā寮忓紑鍚?, { source: 'settings' }, { force: true }); };
+    box.querySelector('[data-a="copyDebug"]').onclick = async () => { try { await navigator.clipboard?.writeText(developerLogText()); msg(debugEvents.length ? '璇婃柇璁板綍宸插鍒? : '褰撳墠娌℃湁璇婃柇璁板綍'); } catch (_) { msg('澶嶅埗澶辫触锛岃鎵撳紑鎺у埗鍙版煡鐪?); } };
+    box.querySelector('[data-a="clearDebug"]').onclick = () => { debugEvents.length = 0; debugLastAt.clear(); try { GM_setValue(DEBUG_STORAGE_KEY, []); } catch (_) {} const state = box.querySelector('[data-a="debugState"]'); if (state) state.textContent = developerModeStateText(); msg('璇婃柇璁板綍宸叉竻绌?); };
+    box.querySelector('[data-a="selfCheck"]').onclick = async () => { msg('姝ｅ湪杩愯鑷鈥?); const result = await runSelfCheck(); alert(result); msg('鑷瀹屾垚'); };
+    box.querySelector('[data-a="useCurrentAccount"]').onclick = () => { const identity = loginIdentity(); const value = identity.loginCode || identity.name; if (!value) return msg('褰撳墠璐﹀彿鏆傛湭璇嗗埆'); f('allowedAccounts').value = value; msg('宸插～鍏ュ綋鍓嶈处鍙?); };
+    box.querySelector('[data-a="clearAccountLimit"]').onclick = () => { f('allowedAccounts').value = ''; msg('宸叉竻绌鸿处鍙烽檺鍒?); };
+    box.querySelector('[data-a="directLoginNow"]').onclick = async () => { read(); saveConfig(); msg('姝ｅ湪鍗忚鐧诲綍鈥?); const ok = await ensureDirectLogin(); msg(ok ? '鍗忚鐧诲綍鎴愬姛' : '鍗忚鐧诲綍鏈畬鎴?); if (ok) { render(); start(); } };
     box.querySelector('[data-a="refreshExamOptions"]').onclick = async () => {
       read();
-      msg('正在更新可选项目…');
+      msg('姝ｅ湪鏇存柊鍙€夐」鐩€?);
       const records = await fetchRadiationRecords({ pageSize: 100, timeoutMs: 8000, ignoreApplicationTime: true, ignoreStatusFilter: true, ignoreModalityFilter: true, ignoreInstitutionFilter: true });
       const fromApi = records.flatMap(record => String(record?.examName || record?.exam || '').split(config.examSeparators).map(norm).filter(Boolean));
       const options = [...new Set([...availableExamOptions(), ...fromApi])].filter(x => !DEFAULT_CONFIG.examNames.some(y => norm(y) === norm(x)));
       config.examNamesCatalog = [...new Set([...(config.examNamesCatalog || []), ...options])];
       saveConfig();
       render();
-      msg(`已更新 ${options.length} 个可选项目`);
+      msg(`宸叉洿鏂?${options.length} 涓彲閫夐」鐩甡);
     };
-    box.querySelector('[data-a="reset"]').onclick = () => { config = structuredClone(DEFAULT_CONFIG); saveConfig(); render(); start(); msg('已恢复默认'); };
-    box.querySelector('[data-a="saveProfile"]').onclick = () => { read(); const n = f('profileName').value.trim(); if (!n) return msg('请填写方案名'); const p = profiles(); p[n] = config; saveProfiles(p); render(); f('profile').value = n; msg('方案已保存'); };
-    box.querySelector('[data-a="loadProfile"]').onclick = () => { const n = f('profile').value; const p = profiles(); if (!n || !p[n]) return msg('请选择方案'); config = migrateConfig(merge(structuredClone(DEFAULT_CONFIG), p[n]), p[n]); saveConfig(); render(); start(); msg('方案已切换'); };
-    box.querySelector('[data-a="deleteProfile"]').onclick = () => { const n = f('profile').value; const p = profiles(); if (n && p[n]) { delete p[n]; saveProfiles(p); render(); msg('方案已删除'); } };
-    box.querySelector('[data-a="export"]').onclick = async () => { await navigator.clipboard?.writeText(JSON.stringify(config, (k, v) => v instanceof RegExp ? { __regexp: v.source } : v, 2)); msg('配置 JSON 已复制'); };
-    box.querySelector('[data-a="import"]').onclick = () => { const s = prompt('粘贴配置 JSON'); if (!s) return; try { const n = JSON.parse(s); if (n.examSeparators?.__regexp) n.examSeparators = new RegExp(n.examSeparators.__regexp); config = migrateConfig(merge(structuredClone(DEFAULT_CONFIG), n), n); saveConfig(); render(); start(); msg('已导入'); } catch (e) { msg('JSON 无效'); } };
+    box.querySelector('[data-a="reset"]').onclick = () => { config = structuredClone(DEFAULT_CONFIG); saveConfig(); render(); start(); msg('宸叉仮澶嶉粯璁?); };
+    box.querySelector('[data-a="saveProfile"]').onclick = () => { read(); const n = f('profileName').value.trim(); if (!n) return msg('璇峰～鍐欐柟妗堝悕'); const p = profiles(); p[n] = config; saveProfiles(p); render(); f('profile').value = n; msg('鏂规宸蹭繚瀛?); };
+    box.querySelector('[data-a="loadProfile"]').onclick = () => { const n = f('profile').value; const p = profiles(); if (!n || !p[n]) return msg('璇烽€夋嫨鏂规'); config = migrateConfig(merge(structuredClone(DEFAULT_CONFIG), p[n]), p[n]); saveConfig(); render(); start(); msg('鏂规宸插垏鎹?); };
+    box.querySelector('[data-a="deleteProfile"]').onclick = () => { const n = f('profile').value; const p = profiles(); if (n && p[n]) { delete p[n]; saveProfiles(p); render(); msg('鏂规宸插垹闄?); } };
+    box.querySelector('[data-a="export"]').onclick = async () => { await navigator.clipboard?.writeText(JSON.stringify(config, (k, v) => v instanceof RegExp ? { __regexp: v.source } : v, 2)); msg('閰嶇疆 JSON 宸插鍒?); };
+    box.querySelector('[data-a="import"]').onclick = () => { const s = prompt('绮樿创閰嶇疆 JSON'); if (!s) return; try { const n = JSON.parse(s); if (n.examSeparators?.__regexp) n.examSeparators = new RegExp(n.examSeparators.__regexp); config = migrateConfig(merge(structuredClone(DEFAULT_CONFIG), n), n); saveConfig(); render(); start(); msg('宸插鍏?); } catch (e) { msg('JSON 鏃犳晥'); } };
     box.querySelector('[data-a="close"]').onclick = () => box.remove();
     render();
   }
 
   function attachToHeaderSettings() {
-    const trigger = document.querySelector('.table-header-setting-btn, [aria-label*="表头"], [title*="表头"], [aria-label*="列设置"], [title*="列设置"]');
+    const trigger = document.querySelector('.table-header-setting-btn, [aria-label*="琛ㄥご"], [title*="琛ㄥご"], [aria-label*="鍒楄缃?], [title*="鍒楄缃?]');
     if (!trigger || trigger.dataset.jxAutoBound) return;
     trigger.dataset.jxAutoBound = '1';
     trigger.addEventListener('click', () => setTimeout(() => {
       const title = document.querySelector('.table-header-setting-wrap__title, .el-popover__title, .el-dialog__header');
       if (!title || title.querySelector('[data-jx-auto-entry]')) return;
       const b = document.createElement('button');
-      b.type = 'button'; b.dataset.jxAutoEntry = '1'; b.textContent = '⚙ 自动诊断设置';
+      b.type = 'button'; b.dataset.jxAutoEntry = '1'; b.textContent = '鈿?鑷姩璇婃柇璁剧疆';
       b.style.cssText = 'margin-left:10px;padding:3px 8px;border:1px solid #409eff;border-radius:4px;background:#ecf5ff;color:#409eff;cursor:pointer;font:12px Segoe UI,Microsoft Yahei,sans-serif';
       b.addEventListener('click', panel); title.appendChild(b);
     }, 80));
   }
 
-  GM_registerMenuCommand('自动诊断：配置', panel);
-  GM_registerMenuCommand('自动诊断：启用/停用', () => { config.enabled = !config.enabled; saveConfig(); console.info('[自动诊断] enabled =', config.enabled); });
+  GM_registerMenuCommand('鑷姩璇婃柇锛氶厤缃?, panel);
+  GM_registerMenuCommand('鑷姩璇婃柇锛氬惎鐢?鍋滅敤', () => { config.enabled = !config.enabled; saveConfig(); console.info('[鑷姩璇婃柇] enabled =', config.enabled); });
   window.addEventListener('beforeunload', () => {
     if (timer) clearInterval(timer);
     if (probeTimer) clearTimeout(probeTimer);
@@ -1589,17 +1535,14 @@
   installRealtimeHintBridge();
   let bootstrapped = false;
   const bootstrap = async () => {
-    // 门户跳转到影像页时，Vue 可能先替换文档再触发 DOMContentLoaded；
-    // 登录页也需要启动，用于第二次以后直接协议登录。
-    const currentUrl = pageWindow().location;
+    // 闂ㄦ埛璺宠浆鍒板奖鍍忛〉鏃讹紝Vue 鍙兘鍏堟浛鎹㈡枃妗ｅ啀瑙﹀彂 DOMContentLoaded锛?    // 鐧诲綍椤典篃闇€瑕佸惎鍔紝鐢ㄤ簬绗簩娆′互鍚庣洿鎺ュ崗璁櫥褰曘€?    const currentUrl = pageWindow().location;
     if (currentUrl.host === '10.10.94.90:22100' || !['/login', '/radiation'].includes(currentUrl.pathname)) {
       setTimeout(bootstrap, 2000);
       return;
     }
     if (bootstrapped) return;
     bootstrapped = true;
-    // 先完成同源协议登录，再启动列表探测；未启用时保持原有登录流程。
-    if (directLoginConfig().enabled && directLoginConfig().username && !document.cookie.includes('Auth=')) {
+    // 鍏堝畬鎴愬悓婧愬崗璁櫥褰曪紝鍐嶅惎鍔ㄥ垪琛ㄦ帰娴嬶紱鏈惎鐢ㄦ椂淇濇寔鍘熸湁鐧诲綍娴佺▼銆?    if (directLoginConfig().enabled && directLoginConfig().username && !document.cookie.includes('Auth=')) {
       const ok = await ensureDirectLogin();
       if (ok && currentUrl.pathname === '/login') {
         pageWindow().location.replace('/radiation');

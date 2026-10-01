@@ -14,9 +14,9 @@ $source = $source -replace '(?m)^// @updateURL\s+.*\r?\n', ''
 $source = $source -replace '(?m)^// @downloadURL\s+.*\r?\n', ''
 $needle = '// @version      '
 $lineEnd = $source.IndexOf("`n", $source.IndexOf($needle))
-if ($lineEnd -lt 0) { throw '无法定位 userscript 元数据版本行' }
+if ($lineEnd -lt 0) { throw 'Unable to locate userscript version metadata' }
 $source = $source.Insert($lineEnd + 1, "// @updateURL   $update`r`n// @downloadURL $update`r`n")
 Set-Content -LiteralPath $sourcePath -Value $source -Encoding utf8 -NoNewline
 
-Write-Output "已写入 GitHub 热更新地址：$update"
-Write-Output '下一步：递增 @version，运行 node tests/source-contract.test.mjs，再推送到目标仓库。'
+Write-Output "GitHub hot-update URL configured: $update"
+Write-Output 'Next: increment @version, run node tests/source-contract.test.mjs, then push to the repository.'
