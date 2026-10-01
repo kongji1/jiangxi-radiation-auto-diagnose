@@ -16,8 +16,9 @@ try {
   $oldNativeErrorPreference = $PSNativeCommandUseErrorActionPreference
   $PSNativeCommandUseErrorActionPreference = $false
   $probe = git ls-remote $remote 2>$null
+  $probeExit = $LASTEXITCODE
   $PSNativeCommandUseErrorActionPreference = $oldNativeErrorPreference
-  if ($LASTEXITCODE -ne 0) {
+  if ($probeExit -ne 0) {
     throw "GitHub repository is not reachable: $Repository"
   }
   git remote set-url origin $remote
