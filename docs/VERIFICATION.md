@@ -76,3 +76,15 @@
 - 浏览器运行态补充：扩展存储当前配置已经出现 `directLogin.ocrEnabled=true` 和 `directLogin.ocrEndpoint=http://127.0.0.1:18766/ocr`，这是 OCR 版本配置标记；刷新后的业务页仍在 `/radiation`，可访问性树中没有“请输入协议登录密码”弹窗。真实 OCR 识别和协议登录仍未执行，不把本次观察扩大为登录成功证明。
 - 随后浏览器当前页可达 `/radiation/report` 诊断表单，报告页显示待诊断/诊断操作和已登录医生信息，证明登录会话与业务报告路由可达；进入动作来源可能包含用户操作，未将其作为脚本自动协议进入的单独证明。
 - 在诊断页继续观察 15 秒后仍保持同一 `/radiation/report` 路由，页面自动保存提示正常更新，没有被列表脚本重新导航或弹出登录密码；这验证了路由离开 `/radiation` 后运行时停止的保护。
+
+## 0.8.35 本地回归与当前运行态结论（2026-10-01）
+
+- `node --check jiangxi-radiation-auto-diagnose.user.js`：通过。
+- `node tests/source-contract.test.mjs`：通过，覆盖 45 项源码契约；新增“不限”旧配置哨兵迁移、运行时配置快照和 TOKEN_FAIL 后受控页面查询兜底。
+- `node tests/release-failure.test.mjs`：通过，3 个原生进程失败场景均按预期失败。
+- `python tests/captcha_ocr.test.py`：通过，4 项 OCR/算式分支通过。
+- `tools/verify-release.ps1 -SkipOcrHealth -RequireClean`：通过，工作树干净。
+- 当前运行配置必须以启动时 `配置门禁快照` 为准；“不限”在内部表示为空筛选集合，旧版持久化的 `['不限']` 会在启动迁移为空集合。不能用 `DEFAULT_CONFIG` 推断浏览器当前实际配置。
+- 对本次陈招发记录的运行态查询：申请时间 `2026-10-01 16:44:47`，最终状态为已审核，诊断时间 `16:54:05`。当前可复现的列表请求返回业务码 `2002/TOKEN_FAIL` 且数量为 0；这足以解释未及时进入，但不能伪造为历史 WebSocket 事件的直接证据。
+- 0.8.35 在协议列表请求出现 `2002` 后仅复用现有 15 秒页面查询闸门触发一次页面原生查询，不新增高频轮询；仍需在 Tampermonkey 中确认该版本已加载后，才能完成运行态闭环。
+- GitHub 连接器身份已确认是 `kongji1`，目标仓库 `kongji1/jiangxi-radiation-auto-diagnose` 目前 API 返回 404；当前 GitHub MCP 能读写已有仓库文件，但未提供创建新仓库操作，因此 Raw 热更新地址尚未可用。
