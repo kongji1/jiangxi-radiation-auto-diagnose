@@ -23,14 +23,14 @@ _ocr_beta: Any = None
 
 
 def _ocr(beta: bool = False) -> Any:
-    import ddddocr
-
     global _ocr_standard, _ocr_beta
     if beta:
         if _ocr_beta is None:
+            import ddddocr
             _ocr_beta = ddddocr.DdddOcr(show_ad=False, beta=True)
         return _ocr_beta
     if _ocr_standard is None:
+        import ddddocr
         _ocr_standard = ddddocr.DdddOcr(show_ad=False)
     return _ocr_standard
 
