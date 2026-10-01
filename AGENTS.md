@@ -7,6 +7,7 @@
 1. `docs/AI_HANDOFF.md`：当前进度、已验证事实和下一步。
 2. `docs/PROTOCOL.md`：业务接口与低负载策略。
 3. `docs/VERIFICATION.md`：哪些结论已验证、哪些仍需浏览器实测。
+4. `docs/GPT6_QUICK_MAINTENANCE.md`：五分钟自动回归和证据定位顺序。
 
 维护要求：
 

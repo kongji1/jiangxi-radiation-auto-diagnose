@@ -10,6 +10,8 @@ const gpt6Guide = fs.readFileSync(path.join(root, 'docs', 'GPT6_MAINTENANCE.md')
 const updateTool = fs.readFileSync(path.join(root, 'tools', 'configure-github-hot-update.ps1'), 'utf8');
 const releaseTool = fs.readFileSync(path.join(root, 'tools', 'verify-release.ps1'), 'utf8');
 const publishTool = fs.readFileSync(path.join(root, 'tools', 'publish-github.ps1'), 'utf8');
+const quickMaintenance = fs.readFileSync(path.join(root, 'tools', 'gpt6-quick-maintenance.ps1'), 'utf8');
+const quickGuide = fs.readFileSync(path.join(root, 'docs', 'GPT6_QUICK_MAINTENANCE.md'), 'utf8');
 
 execFileSync(process.execPath, ['--check', sourcePath], { stdio: 'inherit' });
 
@@ -118,5 +120,8 @@ if (!readme.includes('GPT6_MAINTENANCE.md')) throw new Error('README GPT-6 guide
 if (!gpt6Guide.includes('dispatchDelayMs') || !gpt6Guide.includes('diagnosisActive')) throw new Error('GPT-6 maintenance guide incomplete');
 if (!/source-contract\.test\.mjs/.test(releaseTool) || !/captcha_ocr\.test\.py/.test(releaseTool)) throw new Error('release verification tool incomplete');
 if (!/git ls-remote/.test(publishTool) || !/git push origin/.test(publishTool) || !/raw\.githubusercontent\.com/.test(publishTool)) throw new Error('GitHub publish tool incomplete');
+if (!/node --check/.test(quickMaintenance) || !/release-failure\.test\.mjs/.test(quickMaintenance) || !/READY/.test(quickMaintenance)) throw new Error('GPT-6 quick maintenance tool incomplete');
+if (!/RequireClean/.test(quickMaintenance) || !/workingTree/.test(quickMaintenance)) throw new Error('GPT-6 quick maintenance dirty mode incomplete');
+if (!quickGuide.includes('五分钟') || !quickGuide.includes('配置门禁快照') || !quickGuide.includes('认证上下文')) throw new Error('GPT-6 quick maintenance guide incomplete');
 
 console.log(`source-contract: passed ${required.length} checks; version=${state.version}`);

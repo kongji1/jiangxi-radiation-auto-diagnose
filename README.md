@@ -9,6 +9,7 @@
 - 协议参考包：[reference/app-bundles](./reference/app-bundles)
 - 交接入口：[docs/AI_HANDOFF.md](./docs/AI_HANDOFF.md)
 - GPT-6 维护入口：[docs/GPT6_MAINTENANCE.md](./docs/GPT6_MAINTENANCE.md)
+- GPT-6 五分钟维护入口：[docs/GPT6_QUICK_MAINTENANCE.md](./docs/GPT6_QUICK_MAINTENANCE.md)
 - 协议说明：[docs/PROTOCOL.md](./docs/PROTOCOL.md)
 - 验证记录：[docs/VERIFICATION.md](./docs/VERIFICATION.md)
 - 变更记录：[docs/CHANGELOG.md](./docs/CHANGELOG.md)
