@@ -42,7 +42,7 @@ node --check jiangxi-radiation-auto-diagnose.user.js
 node tests/source-contract.test.mjs
 ```
 
-GitHub Actions 会在每次 push 和 pull request 上重复这两项检查。只有检查通过的提交才应作为 Tampermonkey 更新源。
+GitHub Actions 会在每次 push 和 pull request 上执行语法、源码契约、发布失败保护和验证码测试。只有检查通过的提交才应作为 Tampermonkey 更新源。
 
 ## 发布约定
 
