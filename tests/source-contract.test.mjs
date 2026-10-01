@@ -5,6 +5,7 @@ import { execFileSync } from 'node:child_process';
 const root = path.resolve(import.meta.dirname, '..');
 const sourcePath = path.join(root, 'jiangxi-radiation-auto-diagnose.user.js');
 const source = fs.readFileSync(sourcePath, 'utf8');
+const readme = fs.readFileSync(path.join(root, 'README.md'), 'utf8');
 const updateTool = fs.readFileSync(path.join(root, 'tools', 'configure-github-hot-update.ps1'), 'utf8');
 
 execFileSync(process.execPath, ['--check', sourcePath], { stdio: 'inherit' });
@@ -54,5 +55,7 @@ if (!/def captcha_answer/.test(ocrServer) || !/fullmatch/.test(ocrServer) || !/1
 
 const state = JSON.parse(fs.readFileSync(path.join(root, 'PROJECT_STATE.json'), 'utf8'));
 if (state.version !== '0.8.21') throw new Error(`PROJECT_STATE version mismatch: ${state.version}`);
+if (!readme.includes('源码版本：`0.8.21`')) throw new Error('README version mismatch');
+if (!readme.includes('127.0.0.1:18766')) throw new Error('README OCR endpoint missing');
 
 console.log(`source-contract: passed ${required.length} checks; version=${state.version}`);
