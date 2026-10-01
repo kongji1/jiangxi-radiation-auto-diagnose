@@ -27,6 +27,14 @@ powershell -ExecutionPolicy Bypass -File tools/verify-release.ps1
 
 如果暂时没有启动 OCR 服务，可使用 `-SkipOcrHealth`，但不能把该结果当作登录链路验证。
 
+仓库创建并完成 Git 认证后，使用下面的发布脚本：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/publish-github.ps1 -Repository kongji1/jiangxi-radiation-auto-diagnose
+```
+
+脚本会先执行完整发布检查，再验证远端仓库、推送当前提交，并读取 Raw 文件确认版本为 `0.8.21`。仓库不存在或 Raw 仍返回 404 时会直接失败。
+
 在项目根目录运行：
 
 ```text

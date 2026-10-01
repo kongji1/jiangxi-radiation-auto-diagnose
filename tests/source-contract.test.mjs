@@ -8,6 +8,7 @@ const source = fs.readFileSync(sourcePath, 'utf8');
 const readme = fs.readFileSync(path.join(root, 'README.md'), 'utf8');
 const updateTool = fs.readFileSync(path.join(root, 'tools', 'configure-github-hot-update.ps1'), 'utf8');
 const releaseTool = fs.readFileSync(path.join(root, 'tools', 'verify-release.ps1'), 'utf8');
+const publishTool = fs.readFileSync(path.join(root, 'tools', 'publish-github.ps1'), 'utf8');
 
 execFileSync(process.execPath, ['--check', sourcePath], { stdio: 'inherit' });
 
@@ -60,5 +61,6 @@ if (state.version !== '0.8.21') throw new Error(`PROJECT_STATE version mismatch:
 if (!readme.includes('源码版本：`0.8.21`')) throw new Error('README version mismatch');
 if (!readme.includes('127.0.0.1:18766')) throw new Error('README OCR endpoint missing');
 if (!/source-contract\.test\.mjs/.test(releaseTool) || !/captcha_ocr\.test\.py/.test(releaseTool)) throw new Error('release verification tool incomplete');
+if (!/git ls-remote/.test(publishTool) || !/git push origin/.test(publishTool) || !/raw\.githubusercontent\.com/.test(publishTool)) throw new Error('GitHub publish tool incomplete');
 
 console.log(`source-contract: passed ${required.length} checks; version=${state.version}`);
