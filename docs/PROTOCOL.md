@@ -21,6 +21,10 @@
 
 主脚本的 `radiationListPayload()` 保持页面原始字段结构，重要字段包括：
 
+### 状态探测兼容性
+
+`/api/ct/rays/rep/statusNum` 只发送不带状态、检查类型和机构筛选的全局计数请求。现场抓包确认，带 `reportStatusCodeList` 的状态探测会返回 `code=2002`，使轮询退避并延迟发现新申请。状态计数只负责唤醒轮询，待诊断、锁定、年龄、检查项目和机构规则统一在客户端判断。列表请求遇到同样的 `2002` 时自动退回最近列表并在客户端过滤。
+
 - `pageNum: 1`
 - `pageSize`：普通探测最多 30；手工更新项目最多 100；协议兜底按匹配条件最多 20
 - `sortByParams: [{ sortField: 'checkinTime', sortRule: 'DESC' }]`
