@@ -33,7 +33,7 @@ powershell -ExecutionPolicy Bypass -File tools/verify-release.ps1
 powershell -ExecutionPolicy Bypass -File tools/publish-github.ps1 -Repository kongji1/jiangxi-radiation-auto-diagnose
 ```
 
-脚本会先执行完整发布检查，再验证远端仓库、推送当前提交，并读取 Raw 文件确认版本为 `0.8.33`。仓库不存在或 Raw 仍返回 404 时会直接失败。
+脚本会先执行完整发布检查，再验证远端仓库、推送当前提交，并读取 Raw 文件确认版本为 `0.8.34`。仓库不存在或 Raw 仍返回 404 时会直接失败。
 
 在项目根目录运行：
 

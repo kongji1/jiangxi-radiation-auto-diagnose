@@ -4,7 +4,7 @@
 
 ## 当前版本
 
-- 源码版本：`0.8.33`
+- 源码版本：`0.8.34`
 - 主文件：[jiangxi-radiation-auto-diagnose.user.js](./jiangxi-radiation-auto-diagnose.user.js)
 - 协议参考包：[reference/app-bundles](./reference/app-bundles)
 - 交接入口：[docs/AI_HANDOFF.md](./docs/AI_HANDOFF.md)
