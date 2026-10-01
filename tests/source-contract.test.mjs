@@ -14,7 +14,7 @@ const publishTool = fs.readFileSync(path.join(root, 'tools', 'publish-github.ps1
 execFileSync(process.execPath, ['--check', sourcePath], { stdio: 'inherit' });
 
 const required = [
-  ['metadata version', /@version\s+0\.8\.32/],
+  ['metadata version', /@version\s+0\.8\.33/],
   ['login route', /\/api\/admin\/userLogin\/login/],
   ['read-only status probe', /\/api\/ct\/rays\/rep\/statusNum/],
   ['unfiltered status probe fallback', /radiationListPayload\(\{ pageSize: 1, ignoreStatusFilter: true, ignoreModalityFilter: true, ignoreInstitutionFilter: true, ignoreBodyPartFilter: true \}\)/],
@@ -36,6 +36,8 @@ const required = [
   ['diagnosis-doctor filter', /diagnosisDoctors/],
   ['audit-time filter', /auditTime/],
   ['dynamic option catalog', /columnOptionsCatalog/],
+  ['hot-update runtime probe', /checkUpdateSource/],
+  ['raw update host permission', /@connect\s+raw\.githubusercontent\.com/],
   ['conclusion-only priority', /hasPreliminaryConclusion/],
   ['selector self-healing', /queryBodyRows/],
   ['interactive self-check', /runSelfCheck/],
@@ -89,9 +91,9 @@ if (!/def captcha_answer/.test(ocrServer) || !/fullmatch/.test(ocrServer) || !/1
 }
 
 const state = JSON.parse(fs.readFileSync(path.join(root, 'PROJECT_STATE.json'), 'utf8'));
-if (state.version !== '0.8.32') throw new Error(`PROJECT_STATE version mismatch: ${state.version}`);
+if (state.version !== '0.8.33') throw new Error(`PROJECT_STATE version mismatch: ${state.version}`);
 if (state.performance?.realtimeListMinCooldownMs !== 500) throw new Error('PROJECT_STATE realtime cooldown mismatch');
-if (!readme.includes('源码版本：`0.8.32`')) throw new Error('README version mismatch');
+if (!readme.includes('源码版本：`0.8.33`')) throw new Error('README version mismatch');
 if (!readme.includes('127.0.0.1:18766')) throw new Error('README OCR endpoint missing');
 if (!readme.includes('GPT6_MAINTENANCE.md')) throw new Error('README GPT-6 guide missing');
 if (!gpt6Guide.includes('dispatchDelayMs') || !gpt6Guide.includes('diagnosisActive')) throw new Error('GPT-6 maintenance guide incomplete');

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         江西省县域医共体 - 自动诊断候选
 // @namespace    local.jiangxi.radiation
-// @version      0.8.32
+// @version      0.8.33
 // @updateURL   https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @downloadURL https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @description  以页面实时推送为主、轻量协议探测为兜底，按可配置规则识别后优先通过系统协议进入诊断；支持可控开发者诊断日志。
@@ -13,6 +13,7 @@
 // @grant        GM_setValue
 // @grant        GM_xmlhttpRequest
 // @connect      127.0.0.1
+// @connect      raw.githubusercontent.com
 // @grant        unsafeWindow
 // ==/UserScript==
 
@@ -257,7 +258,7 @@
     console.info(`[自动诊断][开发者] ${JSON.stringify(item)}`);
   }
   function developerLogText() {
-    return JSON.stringify({ version: '0.8.32', exportedAt: new Date().toISOString(), events: debugEvents }, null, 2);
+    return JSON.stringify({ version: '0.8.33', exportedAt: new Date().toISOString(), events: debugEvents }, null, 2);
   }
   function developerModeStateText() {
     if (!config.developerMode) return '当前关闭';
@@ -1616,6 +1617,8 @@
     checks.push(`页面行：${queryBodyRows().length}；账号门禁：${accountAllowed() ? '通过' : '未通过'}`);
     checks.push(`权重：检查项目 ${parseWeights(config.examWeights).size} 项，机构 ${parseWeights(config.institutionWeights).size} 项`);
     checks.push(`年龄：${config.age?.unlimited ? '不限' : `${config.age?.min ?? ''}-${config.age?.max ?? ''}`}`);
+    const updateSource = await checkUpdateSource();
+    checks.push(`热更新源：${updateSource.ok ? `可读 ${updateSource.version || '未识别版本'}` : updateSource.reason}`);
     if (path === '/radiation') {
       try {
         const result = await fetchJson('/api/admin/user/info', { method: 'GET', credentials: 'include', headers: { Accept: 'application/json' } }, 5000);
@@ -1628,6 +1631,27 @@
     }
     developerLog('脚本自检', { source: 'self-check', checkCount: checks.length, route: path }, { force: true });
     return checks.join('\n');
+  }
+
+  function checkUpdateSource() {
+    const url = 'https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js';
+    return new Promise(resolve => {
+      if (typeof GM_xmlhttpRequest !== 'function') return resolve({ ok: false, reason: 'GM 网络权限不可用' });
+      let settled = false;
+      const finish = result => { if (!settled) { settled = true; resolve(result); } };
+      try {
+        GM_xmlhttpRequest({
+          method: 'GET', url, timeout: 4000,
+          onload: response => {
+            const text = String(response.responseText || '');
+            const match = text.match(/@version\s+([^\s]+)/);
+            finish(response.status === 200 && match ? { ok: true, version: match[1] } : { ok: false, reason: `HTTP ${response.status || '未知'}` });
+          },
+          ontimeout: () => finish({ ok: false, reason: '请求超时' }),
+          onerror: () => finish({ ok: false, reason: '网络不可达' })
+        });
+      } catch (_) { finish({ ok: false, reason: 'GM 网络调用失败' }); }
+    });
   }
 
   function panel() {
