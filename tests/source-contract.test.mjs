@@ -32,6 +32,8 @@ const required = [
   ['direct login from radiation', /directLoginRoute = currentUrl\.pathname === '\/login' \|\| currentUrl\.pathname === '\/radiation'/],
   ['captcha OCR bridge', /recognizeCaptcha\(capJson\.data\.img\)/],
   ['captcha OCR fallback', /await recognizeCaptcha\(capJson\.data\.img\) \|\| await askCaptcha/],
+  ['direct login session probe', /sessionProbe = await fetch\('\/api\/admin\/user\/info'/],
+  ['probe before password prompt', /sessionProbe\.ok && sessionPayload\?\.code === 200 && sessionPayload\.data[\s\S]+?directPassword = window\.prompt/],
   ['no password persistence', /directPassword = ''/],
   ['radiation route guard', /pathname !== '\/radiation'/],
   ['route cleanup', /stopRuntime\('route-exit'\)/],

@@ -435,6 +435,16 @@
     if (document.cookie.includes('Auth=')) return false;
     directLoginRunning = true;
     try {
+      // Auth may be HttpOnly or not yet mirrored into document.cookie. Probe the
+      // read-only user endpoint before asking for a password so a logged-in page
+      // never shows a needless protocol-login prompt on refresh.
+      const sessionProbe = await fetch('/api/admin/user/info', { credentials: 'include', headers: { Accept: 'application/json' } });
+      let sessionPayload = null;
+      try { sessionPayload = await sessionProbe.json(); } catch (_) {}
+      if (sessionProbe.ok && sessionPayload?.code === 200 && sessionPayload.data) {
+        sessionIdentity = { info: sessionPayload.data, uid: norm(sessionPayload.data.uid), loading: false, lastAttemptAt: Date.now(), loadedAt: Date.now() };
+        return true;
+      }
       if (!directPassword) {
         directPassword = window.prompt('请输入协议登录密码（仅本次页面会话使用，不会保存）') || '';
         if (!directPassword) return false;
