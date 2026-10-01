@@ -356,9 +356,13 @@
       await ensureSessionIdentity();
       return run({ ...options, __tokenRecoveryRetry: true });
     }
-    if (result.payload?.code === 2002 && directLoginConfig().enabled && page.location?.pathname === '/radiation' && Date.now() - reauthScheduledAt > 300000) {
+    const loginConfig = directLoginConfig();
+    // 只有明确配置了协议登录账号才允许会话自愈进入 /login。
+    // 仅勾选开关但账号为空时，门户登录页会把页面带到 /setting/profile，
+    // 这会打断当前列表并造成“刷新几秒后跳个人资料”的假象。
+    if (result.payload?.code === 2002 && loginConfig.enabled && String(loginConfig.username || '').trim() && page.location?.pathname === '/radiation' && Date.now() - reauthScheduledAt > 300000) {
       reauthScheduledAt = Date.now();
-      developerLog('会话自愈调度', { source: 'token-recovery', reason: 'TOKEN_FAIL' }, { force: true });
+      developerLog('会话自愈调度', { source: 'token-recovery', reason: 'TOKEN_FAIL', hasLoginAccount: true }, { force: true });
       setTimeout(() => { if (page.location?.pathname === '/radiation') page.location.replace('/login'); }, 800);
     }
     return result;

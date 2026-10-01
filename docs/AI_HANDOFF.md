@@ -148,3 +148,9 @@
 - The source does not contain a `/setting/profile` navigation target. 0.8.18 now records route changes in developer mode and stops all timers, observers, and candidate processing as soon as the page leaves `/radiation`.
 - Header settings integration is restricted to known table-column controls. Broad `title`/`aria-label` matching was removed so unrelated profile/navigation controls cannot receive the settings handler.
 - The GitHub hot-update helper now delegates source editing to `tools/configure-github-hot-update.mjs`, which uses explicit UTF-8 reads/writes and refuses to overwrite the userscript when metadata cannot be read. The PowerShell wrapper only locates Node and passes the repository/branch arguments. Do not run an older copy of the helper against the Chinese userscript.
+
+## 2026-10-01 continuation: root cause of profile redirect
+
+- Browser extension storage diagnostics captured the actual sequence: `statusNum code=2002` -> `会话自愈调度` -> `/login` -> `/setting/profile`.
+- The saved configuration had direct-login enabled but no protocol login username. The recovery branch previously checked only the enabled flag, so it sent an incomplete session to `/login`.
+- Recovery now requires a non-empty configured login username before navigating to `/login`; an empty account leaves the user on `/radiation` and records the failure without redirecting.

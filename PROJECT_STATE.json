@@ -8,7 +8,7 @@
   "protocol": "docs/PROTOCOL.md",
   "verification": "docs/VERIFICATION.md",
   "tampermonkeyLoadedVersion": "unknown; previously observed 0.5.0 before this project move",
-  "liveVerification": "Source contract and syntax tests pass for 0.8.18; TOKEN_FAIL recovery, selector self-healing, route guard, and UTF-8 hot-update safety are source-verified; browser runtime and remote repository publication remain to be verified.",
+  "liveVerification": "Source contract and syntax tests pass for 0.8.18; browser storage diagnostics reproduced TOKEN_FAIL -> /login -> /setting/profile, and the recovery guard now requires a configured login username before redirecting. Browser verification after installing the fix and remote repository publication remain to be verified.",
   "performance": {
     "localScanMs": 2000,
     "statusProbeMs": 5000,

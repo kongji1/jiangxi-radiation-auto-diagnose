@@ -24,6 +24,7 @@ const required = [
   ['interactive self-check', /runSelfCheck/],
   ['TOKEN_FAIL recovery', /__tokenRecoveryRetry/],
   ['automatic re-auth navigation', /会话自愈调度/],
+  ['reauth requires configured account', /loginConfig\.enabled && String\(loginConfig\.username \|\| ''\)\.trim\(\)/],
   ['no password persistence', /directPassword = ''/],
   ['radiation route guard', /pathname !== '\/radiation'/],
   ['route cleanup', /stopRuntime\('route-exit'\)/],
