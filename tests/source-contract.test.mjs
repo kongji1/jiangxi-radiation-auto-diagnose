@@ -189,6 +189,10 @@ const ocrServer = fs.readFileSync(path.join(root, 'tools', 'captcha_ocr_server.p
 if (!/def captcha_answer/.test(ocrServer) || !/fullmatch/.test(ocrServer) || !/127\.0\.0\.1/.test(ocrServer)) {
   throw new Error('CAPTCHA OCR bridge must safely evaluate arithmetic challenges on loopback only');
 }
+const ocrStarter = fs.readFileSync(path.join(root, 'tools', 'start-captcha-ocr.ps1'), 'utf8');
+if (!/Get-NetTCPConnection/.test(ocrStarter) || !/already occupied/.test(ocrStarter) || !/captcha-ocr/.test(ocrStarter)) {
+  throw new Error('CAPTCHA OCR starter must detect occupied ports and recognize its own health response');
+}
 
 const state = JSON.parse(fs.readFileSync(path.join(root, 'PROJECT_STATE.json'), 'utf8'));
 
