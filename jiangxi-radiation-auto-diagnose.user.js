@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         江西省县域医共体 - 自动诊断候选
 // @namespace    local.jiangxi.radiation
-// @version      0.8.43
+// @version      0.8.44
 // @updateURL   https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @downloadURL https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @description  以页面实时推送为主、轻量协议探测为兜底，按可配置规则识别后优先通过系统协议进入诊断；支持可控开发者诊断日志。
@@ -20,7 +20,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.8.43';
+  const SCRIPT_VERSION = '0.8.44';
 
   // 所有业务规则和页面定位都集中在这里，也可以从表头设置弹窗进入配置面板修改。
   const DEFAULT_CONFIG = {
@@ -272,6 +272,7 @@
       tag: debugTag(d),
       key: d?.key || '',
       applicationNo: d?.applicationNo || '',
+      patientName: d?.patientName || d?.record?.patName || d?.record?.patientName || '',
       patient: d?.patient || '',
       applyTime: d?.applyTime || '',
       record: d?.record || null,
@@ -738,6 +739,7 @@
     const headers = headerTable ? [...headerTable.querySelectorAll('thead th .cell')].map(e => norm(e.innerText)) : [];
     const at = (...names) => { const i = headers.findIndex(x => names.includes(x)); return i >= 0 ? cells[i] : null; };
     const patient = norm(at('患者信息')?.innerText);
+    const patientName = norm(patient.replace(/(门诊|急诊|住院|体检).*$/, '').replace(/(?:男|女)?\d{1,3}岁$/, ''));
     const status = norm(at('检查状态')?.innerText);
     // DOM 行通常没有原始 statusCode；用固定状态字典补齐开发者诊断证据，
     // 但只把它作为观测值，不用它改动页面筛选条件。
@@ -763,7 +765,7 @@
     const hospital = norm(at('检查医院')?.innerText);
     const checkbox = row.querySelector('input[type="checkbox"]');
     const key = checkbox?.id || [patient, applyTime, modality, exam].join('|');
-    return { row, record: null, patient, status, statusCode, locked: domRowLocked(row), imageStatus, modality, applyTime, diagnosisTime, auditTime, doctor, diagnosisDoctor: doctor, auditDoctor, conclusion, description, exam, bodyPart, applicationNo: applyNo, institution, hospital, rowText, age: parseAge(patient), gender: parseGender(patient), key };
+    return { row, record: null, patientName, patient, status, statusCode, locked: domRowLocked(row), imageStatus, modality, applyTime, diagnosisTime, auditTime, doctor, diagnosisDoctor: doctor, auditDoctor, conclusion, description, exam, bodyPart, applicationNo: applyNo, institution, hospital, rowText, age: parseAge(patient), gender: parseGender(patient), key };
   }
 
   function queryBodyRows(root = document) {
@@ -781,7 +783,8 @@
     const ageValue = record.patAge ?? record.age;
     const numericAge = ageValue == null || ageValue === '' ? NaN : Number(String(ageValue).replace(/岁/g, ''));
     const age = Number.isFinite(numericAge) ? numericAge : parseAge(String(record.patName || record.patientName || ''));
-    const patient = norm([record.patName || record.patientName, encounter, gender, Number.isFinite(age) ? `${age}岁` : ''].filter(Boolean).join(' '));
+    const patientName = norm(record.patName || record.patientName);
+    const patient = norm([patientName, encounter, gender, Number.isFinite(age) ? `${age}岁` : ''].filter(Boolean).join(' '));
     const repUid = record.repUid || record.reportUid || record.reportId || record.id;
     const applicationNo = norm(record.applyNo || record.applicationNo || record.orderId);
     const exam = norm(record.examName || record.exam);
@@ -798,7 +801,7 @@
     const description = norm(record.description || record.reportDescription || record.reportDesc || record.remark || record.remarkText);
     const rowText = norm([patient, status, imageStatus, modality, applyTime, exam, bodyPart, record.applyOrgName, record.checkOrgName, applicationNo, record.orderId].filter(Boolean).join('|'));
     return {
-      row: null, record, patient, status, statusCode, locked, imageStatus, modality,
+      row: null, record, patientName, patient, status, statusCode, locked, imageStatus, modality,
       applyTime,
       diagnosisTime: norm(record.repTime || record.diagnosisTime), auditTime: norm(record.auditTime || record.auditDate), doctor: norm(record.reportDoc), diagnosisDoctor: norm(record.reportDoc),
       auditDoctor: norm(record.auditDoc || record.auditDoctor), exam, bodyPart, applicationNo, conclusion, description,
@@ -806,6 +809,11 @@
       rowText, age: Number.isFinite(age) ? age : null, gender: gender || parseGender(patient),
       key: repUid ? `rep:${repUid}` : [patient, applicationNo, exam].join('|')
     };
+  }
+
+  function currentCheckOrgId(options = {}) {
+    const info = sessionIdentity.info || {};
+    return norm(options.checkOrgId || info.oid || info.orgId || info.checkOrgId || info.orgCode || info.userInfo?.oid || '');
   }
 
   function parseWeights(value) {
@@ -1049,6 +1057,7 @@
   function radiationListPayload(options = {}) {
     const match = options.match || null;
     const timeRange = options.ignoreApplicationTime ? { start: '', end: '' } : (options.timeRange || applicationTimeRange(config.applicationTime));
+    const checkOrgId = currentCheckOrgId(options);
     const payload = {
       modalityList: [], patName: '', startDiagTime: '', endDiagTime: '', diagDate: '',
       checkinStartTime: timeRange.start, checkinEndTime: timeRange.end, studyDate: '', status: '', patId: '',
@@ -1056,7 +1065,7 @@
       applyDep: '', applyOrgName: '', opinion: '', patSource: '', bodyPartName: '', examName: '',
       reportStatusCodeList: [], did: '', roomId: '', repGroupList: [], auditGroupList: [],
       sortColumnName: '', sortStatus: '', recentAudit: false, recentDiagnosis: false,
-      docUid: null, patAgeUnit: '岁', sortByParams: [{ sortField: 'checkinTime', sortRule: 'DESC' }], checkOrgId: '', clinicalInfo: '',
+      docUid: null, patAgeUnit: '岁', sortByParams: [{ sortField: 'checkinTime', sortRule: 'DESC' }], checkOrgId, clinicalInfo: '',
       tailOrderIds: [], gender: '', pageNum: 1, pageSize: Math.max(1, Math.min(100, Number(options.pageSize) || 30))
     };
     if (!options.ignoreStatusFilter) payload.reportStatusCodeList = probeStatusCodes();
@@ -1064,7 +1073,7 @@
     if (!options.ignoreInstitutionFilter && config.applyInstitution?.length === 1) payload.applyOrgName = config.applyInstitution[0];
     if (!options.ignoreBodyPartFilter && config.bodyParts?.length === 1) payload.bodyPartName = config.bodyParts[0];
     if (match) {
-      const patientName = norm(match.patient).split(/门诊|急诊|住院|体检/)[0];
+      const patientName = candidatePatientName(match);
       if (patientName) payload.patName = patientName;
       if (match.applicationNo) {
         payload.applyNo = match.applicationNo;
@@ -1078,6 +1087,7 @@
     // 列表接口只读，不会改变报告状态；同时用于协议兜底和更新可选项目。
     const startedAt = Date.now();
     const requestId = `list-${startedAt}-${debugHash(`${options.reason || 'list'}|${debugTag(options.match)}`)}`;
+    let scopeId = currentCheckOrgId(options);
     developerLog('列表请求开始', {
       requestId,
       source: options.reason || 'list', narrow: !!options.match,
@@ -1087,10 +1097,12 @@
       dispatchDelayMs: options.hintAt ? Math.max(0, startedAt - Number(options.hintAt) || 0) : null,
       diagnosisActive,
       entryRunning,
-      statusProbeFailures
+      statusProbeFailures,
+      checkOrgId: debugCredentialShape(scopeId)
     });
     try {
       await ensureSessionIdentity();
+      scopeId = currentCheckOrgId(options);
       let { response, payload: json } = await fetchJson('/api/ct/rays/rep/list', {
         method: 'POST', credentials: 'include',
         headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
@@ -1108,7 +1120,7 @@
       }
       const records = json?.data?.records || json?.data?.list || (Array.isArray(json?.data) ? json.data : []);
       if (!response.ok || json?.code !== 200 || !Array.isArray(records)) {
-        developerLog('列表请求结果', { requestId, source: options.reason || 'list', ok: false, httpOk: !!response.ok, httpStatus: response.status ?? null, code: json?.code ?? null, count: 0, durationMs: Date.now() - startedAt, diagnosisActive, entryRunning });
+        developerLog('列表请求结果', { requestId, source: options.reason || 'list', ok: false, httpOk: !!response.ok, httpStatus: response.status ?? null, code: json?.code ?? null, count: 0, durationMs: Date.now() - startedAt, diagnosisActive, entryRunning, checkOrgId: debugCredentialShape(scopeId) });
         // When the protocol session is rejected but the rendered workbench is
         // still usable, let the page's own Axios request refresh its session
         // headers once.  This is a bounded visible-page fallback, not a new
@@ -1119,7 +1131,34 @@
         }
         return [];
       }
-      developerLog('列表请求结果', { requestId, source: options.reason || 'list', ok: true, httpStatus: response.status ?? null, code: json?.code ?? null, count: records.length, durationMs: Date.now() - startedAt, diagnosisActive, entryRunning });
+      // WebSocket 线索经常只有报告编号、姓名和检查项目，服务端按当前页面
+      // 的状态/检查类型/时间组合筛选可能返回空数组。对单条实时线索只做一次
+      // 精确姓名兜底，并清除服务端组合筛选，让客户端拿到完整记录后再判断；
+      // 普通心跳不走这个分支，避免增加服务器负载。
+      if (!records.length && options.match && !options._matchFallbackTried) {
+        const fallbackMatch = { ...options.match, exam: '' };
+        developerLog('实时线索窄列表为空，退回精确查询', {
+          requestId,
+          source: options.reason || 'list',
+          candidateTag: debugTag(options.match),
+          patientName: candidatePatientName(options.match),
+          reason: '服务端组合筛选返回空，改用姓名精确查询补全记录'
+        }, { force: true });
+        const fallback = await fetchRadiationRecords({
+          ...options,
+          match: fallbackMatch,
+          pageSize: Math.max(30, Number(options.pageSize) || 30),
+          ignoreApplicationTime: true,
+          ignoreStatusFilter: true,
+          ignoreModalityFilter: true,
+          ignoreInstitutionFilter: true,
+          ignoreBodyPartFilter: true,
+          _matchFallbackTried: true,
+          reason: `${options.reason || 'list'}-match-fallback`
+        });
+        if (fallback.length) return fallback;
+      }
+      developerLog('列表请求结果', { requestId, source: options.reason || 'list', ok: true, httpStatus: response.status ?? null, code: json?.code ?? null, count: records.length, durationMs: Date.now() - startedAt, diagnosisActive, entryRunning, checkOrgId: debugCredentialShape(scopeId) });
       return records;
     } catch (e) {
       console.warn('[自动诊断] 列表协议查询失败', String(e));
@@ -1131,7 +1170,7 @@
   async function findRowRecordByApi(d) {
     try {
       const records = await fetchRadiationRecords({ match: d, pageSize: 20, timeoutMs: 4500 });
-      const patientName = norm(d.patient).split(/门诊|急诊|住院|体检/)[0];
+      const patientName = candidatePatientName(d);
       const score = record => {
         let n = 0;
         if (d.applicationNo && [record.applyNo, record.applicationNo].some(x => norm(x) === norm(d.applicationNo))) n += 20;
@@ -1286,6 +1325,13 @@
       d?.record?.repUid != null ? `rep:${d.record.repUid}` : '',
       d?.applicationNo ? `apply:${norm(d.applicationNo)}` : ''
     ].filter(Boolean))];
+  }
+  function candidatePatientName(d) {
+    const explicit = norm(d?.patientName || d?.record?.patName || d?.record?.patientName);
+    if (explicit) return explicit;
+    return norm(d?.patient)
+      .replace(/(门诊|急诊|住院|体检).*$/, '')
+      .replace(/(?:男|女)?\d{1,3}岁$/, '');
   }
   function dataSeen(d) { return dataKeys(d).some(key => seen.has(key)); }
   function rememberData(d) {
@@ -1904,6 +1950,7 @@
       age: { min: config.age?.min ?? null, max: config.age?.max ?? null, unlimited: !!config.age?.unlimited },
       applicationTimeMode: config.applicationTime?.mode || 'all',
       applicationTime: { minMinutes: config.applicationTime?.minMinutes ?? null, maxMinutes: config.applicationTime?.maxMinutes ?? null, days: config.applicationTime?.days ?? null, start: config.applicationTime?.start || '' },
+      checkOrgId: debugCredentialShape(currentCheckOrgId()),
       reportStatusCount: (config.reportStatuses || []).length,
       skipLockedRecords: config.skipLockedRecords !== false,
       lockedRecordPolicy: config.skipLockedRecords !== false ? '检测到其他用户锁定时跳过' : '允许尝试，交由服务端校验'

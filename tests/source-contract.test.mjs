@@ -16,7 +16,7 @@ const quickGuide = fs.readFileSync(path.join(root, 'docs', 'GPT6_QUICK_MAINTENAN
 execFileSync(process.execPath, ['--check', sourcePath], { stdio: 'inherit' });
 
 const required = [
-  ['metadata version', /@version\s+0\.8\.43/],
+  ['metadata version', /@version\s+0\.8\.44/],
   ['runtime version telemetry', /developerLog\('运行版本'[\s\S]+SCRIPT_VERSION/],
   ['route re-entry restart', /isMonitorRoute\(path\) && changed[\s\S]+运行时重启[\s\S]+start\(\{ preserveDiagnosisLock: true \}\)/],
   ['route re-entry preserves diagnosis lock', /start\(\{ preserveDiagnosisLock: true \}\)/],
@@ -48,6 +48,10 @@ const required = [
   ['candidate disappearance evidence', /候选未在后续列表出现/],
   ['server rejection detail', /serverMessage: serverMessage\.slice/],
   ['list request correlation', /requestId = `list-/],
+  ['current organization scope', /checkOrgId: debugCredentialShape\(scopeId\)/],
+  ['organization scope helper', /function currentCheckOrgId/],
+  ['incomplete realtime exact-name fallback', /实时线索窄列表为空，退回精确查询/],
+  ['candidate patient-name normalization', /function candidatePatientName/],
   ['locked-record realtime hard gate', /shouldSkipLocked\(entryData\) \|\| \(!isPendingReport\(entryData\)/],
   ['age-unlimited setting', /ageUnlimited/],
   ['exam weights', /examWeights/],
@@ -109,6 +113,25 @@ if (readCookie('Auth') !== 'auth-value' || readCookie('LoginCode') !== '36073200
   throw new Error('source contract failed: uppercase auth cookie lookup behavior');
 }
 
+const patientNameStart = source.indexOf('  function candidatePatientName');
+const patientNameEnd = source.indexOf('\n  function dataSeen', patientNameStart);
+if (patientNameStart < 0 || patientNameEnd < 0) throw new Error('source contract failed: candidate patient-name helper missing');
+const candidatePatientName = new Function('norm', `${source.slice(patientNameStart, patientNameEnd)}; return candidatePatientName;`)(value => String(value ?? '').trim());
+if (candidatePatientName({ patient: '张传和男52岁' }) !== '张传和' || candidatePatientName({ patient: '张传和门诊男52岁' }) !== '张传和') {
+  throw new Error('source contract failed: realtime patient-name normalization');
+}
+
+const scopeStart = source.indexOf('  function currentCheckOrgId');
+const scopeEnd = source.indexOf('\n  function parseWeights', scopeStart);
+if (scopeStart < 0 || scopeEnd < 0) throw new Error('source contract failed: organization scope helper missing');
+const currentCheckOrgId = new Function('norm', 'sessionIdentity', `${source.slice(scopeStart, scopeEnd)}; return currentCheckOrgId;`)(
+  value => String(value ?? '').trim(),
+  { info: { oid: 'oid-primary', orgId: 'oid-secondary' } }
+);
+if (currentCheckOrgId() !== 'oid-primary' || currentCheckOrgId({ checkOrgId: 'oid-explicit' }) !== 'oid-explicit') {
+  throw new Error('source contract failed: organization scope selection');
+}
+
 // diagnosisActive is an entry mutex only. Monitoring and list refresh must keep
 // running while a report page still exposes the pending list on the right.
 for (const functionName of ['refreshRemoteCandidates', 'probeStatus', 'queueRealtimeRefresh', 'processRealtimeHint', 'scan']) {
@@ -160,7 +183,7 @@ if (!/def captcha_answer/.test(ocrServer) || !/fullmatch/.test(ocrServer) || !/1
 }
 
 const state = JSON.parse(fs.readFileSync(path.join(root, 'PROJECT_STATE.json'), 'utf8'));
-if (state.version !== '0.8.43') throw new Error(`PROJECT_STATE version mismatch: ${state.version}`);
+if (state.version !== '0.8.44') throw new Error(`PROJECT_STATE version mismatch: ${state.version}`);
 if (state.performance?.realtimeListMinCooldownMs !== 500) throw new Error('PROJECT_STATE realtime cooldown mismatch');
 if (state.performance?.developerModeDefault !== true) throw new Error('PROJECT_STATE developer mode default mismatch');
 if (state.performance?.developerDebugRetentionMs !== 600000) throw new Error('PROJECT_STATE developer retention mismatch');
@@ -170,7 +193,7 @@ if (state.performance?.credentialValuesPersisted !== false) throw new Error('PRO
 if (state.performance?.cookieNameCaseInsensitive !== true) throw new Error('PROJECT_STATE cookie case-insensitive lookup mismatch');
 if (state.lastObservedRuntime?.statusProbe !== 'code=2002 repeated; auth headers absent in script context') throw new Error('PROJECT_STATE runtime evidence mismatch');
 if (state.lastObservedRuntime?.entryEventsObserved !== 0) throw new Error('PROJECT_STATE runtime entry evidence mismatch');
-if (!readme.includes('源码版本：`0.8.43`')) throw new Error('README version mismatch');
+if (!readme.includes('源码版本：`0.8.44`')) throw new Error('README version mismatch');
 if (!readme.includes('127.0.0.1:18766')) throw new Error('README OCR endpoint missing');
 if (!readme.includes('GPT6_MAINTENANCE.md')) throw new Error('README GPT-6 guide missing');
 if (!gpt6Guide.includes('dispatchDelayMs') || !gpt6Guide.includes('diagnosisActive')) throw new Error('GPT-6 maintenance guide incomplete');
