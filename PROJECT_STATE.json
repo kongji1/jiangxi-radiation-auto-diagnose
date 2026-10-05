@@ -7,12 +7,12 @@
   "handoff": "docs/AI_HANDOFF.md",
   "protocol": "docs/PROTOCOL.md",
   "verification": "docs/VERIFICATION.md",
-  "tampermonkeyLoadedVersion": "not independently confirmed; browser storage exposes directLogin OCR fields but not the metadata version",
-  "liveVerification": "Source contract, syntax, lifecycle synthetic transition, release-failure, and arithmetic CAPTCHA bridge tests pass for 0.8.45. Auto-open can be disabled independently from read-only monitoring: WebSocket/status/list observation, developer diagnostics, and self-healing route/session checks continue while no protocol or page entry is attempted. Developer events retain full candidate fields locally for a rolling ten-minute window, are periodically purged and persisted, record credential shape diagnostics without persisting raw credentials, snapshot selected filter values at runtime start, emit an explicit runtime version event, and correlate candidate lifecycle timestamps, list request ids, protocol responses, and lock/status transitions. Real browser loading, GitHub Raw publication, and end-to-end read-only monitoring remain to be confirmed in the browser runtime.",
+  "tampermonkeyLoadedVersion": "0.8.44 observed via current Edge CUA/CDP runtime-start log on 2026-10-05; local source is 0.8.45",
+  "liveVerification": "Source contract, syntax, lifecycle synthetic transition, release-failure, and arithmetic CAPTCHA bridge tests pass for 0.8.45. Current Edge CUA/CDP runtime-start logging proves Tampermonkey is running 0.8.44, so the browser is one version behind the local 0.8.45 source. Auto-open can be disabled independently from read-only monitoring: WebSocket/status/list observation, developer diagnostics, and self-healing route/session checks continue while no protocol or page entry is attempted. Developer events retain full candidate fields locally for a rolling ten-minute window, are periodically purged and persisted, record credential shape diagnostics without persisting raw credentials, snapshot selected filter values at runtime start, emit an explicit runtime version event, and correlate candidate lifecycle timestamps, list request ids, protocol responses, and lock/status transitions. GitHub Raw publication and the 0.8.45 browser update remain unverified.",
   "lastObservedRuntime": {
-    "capturedAt": "2026-10-05T10:55:08+08:00",
-    "source": "Edge Default Tampermonkey local extension storage",
-    "scriptVersionObservedInSourceRecord": "0.8.40",
+    "capturedAt": "2026-10-05T12:07:27.160Z",
+    "source": "Current Edge CUA/CDP page developer log from Tampermonkey userscript runtime",
+    "scriptVersionObservedInSourceRecord": "0.8.44",
     "statusProbe": "code=2002 repeated; auth headers absent in script context",
     "cookieNamesObserved": [
       "LOGINCODE",
@@ -21,7 +21,7 @@
     ],
     "pageQueryFallback": "native page query completed about every 15 seconds",
     "entryEventsObserved": 0,
-    "interpretation": "The page remained usable, but protocol list/entry could not authenticate because cookie lookup was case-sensitive; fix is included in 0.8.42 and must be reloaded before measuring again. Lifecycle diagnostics are included in 0.8.43 and the incomplete WebSocket record fallback is included in 0.8.44. Version 0.8.45 separates read-only monitoring from automatic opening; browser loading and the no-entry observation path still require runtime confirmation."
+    "interpretation": "The current page remains usable and the script is active, but the runtime-start event identifies the loaded userscript as 0.8.44. Local 0.8.45 adds the independent read-only monitoring gate and OCR port preflight, so those changes are not yet in this browser runtime. GitHub Raw publication and browser update are still pending."
   },
   "performance": {
     "localScanMs": 2000,
