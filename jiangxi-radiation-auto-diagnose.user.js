@@ -30,7 +30,7 @@
     monitoringEnabled: true,
     // 默认开启完整诊断记录；仅保留最近 10 分钟，关闭后按用户选择持久化。
     developerMode: true,
-    developerModeDebugWindowVersion: '0.8.36',
+    developerModeDebugWindowVersion: '0.8.45',
     // [] 表示不限登录账号；填写账号编号或登录名后，仅对匹配账号启用自动诊断。
     allowedAccounts: [],
     // 协议登录只保存账号，不保存密码；密码仅在当前页面会话内存中使用。
