@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         江西省县域医共体 - 自动诊断候选
 // @namespace    local.jiangxi.radiation
-// @version      0.8.41
+// @version      0.8.42
 // @updateURL   https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @downloadURL https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @description  以页面实时推送为主、轻量协议探测为兜底，按可配置规则识别后优先通过系统协议进入诊断；支持可控开发者诊断日志。
@@ -20,7 +20,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.8.41';
+  const SCRIPT_VERSION = '0.8.42';
 
   // 所有业务规则和页面定位都集中在这里，也可以从表头设置弹窗进入配置面板修改。
   const DEFAULT_CONFIG = {
@@ -45,6 +45,9 @@
     // 待诊断在当前系统中的状态值；脚本会优先点击这个复选框，再读取表格。
     pendingStatusValue: '102501',
     reportStatuses: ['待诊断'],
+    // 默认跳过已经被其它用户锁定/占用的记录；关闭后仍会先经过待诊断状态门禁，
+    // 再尝试协议校验，最终是否允许进入由服务器决定。
+    skipLockedRecords: true,
     imageStatuses: [],
     encounterTypes: ['门诊', '急诊'], // [] 表示不限；住院不会被默认放行
     gender: [],                         // [] 表示不限；可填 ['男'] 或 ['女']
@@ -841,6 +844,15 @@
     return [record.isLock, record.isLocked, record.locked, record.lock, record.lockedByOther, record.lockStatus, record.lockUser, record.lockUserName, record.lockReason, record.occupyStatus, record.occupyUser, record.isOccupied]
       .some(lockValue);
   }
+  function lockedRecordDetected(d) {
+    if (!d) return false;
+    if (d.locked || recordLockState(d.record)) return true;
+    const status = norm(d.status || d.record?.reportStatus || d.record?.reportStatusName || d.record?.checkStatusName);
+    return /占用|锁定/.test(status) && !/未锁定/.test(status);
+  }
+  function shouldSkipLocked(d) {
+    return config.skipLockedRecords !== false && lockedRecordDetected(d);
+  }
   function domRowLocked(row) {
     if (!row) return false;
     const rowLabel = [row.title, row.getAttribute('aria-label'), row.dataset?.lockStatus, row.dataset?.locked, row.textContent].map(norm).join('|');
@@ -854,18 +866,18 @@
   }
   function isPendingReport(d) {
     if (!d) return false;
-    if (d.locked || recordLockState(d.record)) return false;
+    if (shouldSkipLocked(d)) return false;
     const pendingCode = norm(config.pendingStatusValue || '102501');
     const statusCode = norm(d.statusCode || d.record?.reportStatusCode || d.record?.checkStatusCode || d.record?.statusCode);
     const status = norm(d.status || d.record?.reportStatus || d.record?.reportStatusName || d.record?.checkStatusName);
-    if (/诊断中|待审核|审核中|已审核|已打印|占用/.test(status) || (/锁定/.test(status) && !/未锁定/.test(status))) return false;
+    if (/诊断中|待审核|审核中|已审核|已打印/.test(status)) return false;
     if (statusCode) return statusCode === pendingCode;
     return status === '待诊断' || status.includes('待诊断');
   }
 
   function matchFailureReasons(d) {
     const reasons = [];
-    if (!isPendingReport(d)) reasons.push(d?.locked || recordLockState(d?.record) ? '报告已锁定/占用' : '报告状态非待诊断');
+    if (!isPendingReport(d)) reasons.push(shouldSkipLocked(d) ? '报告已锁定/占用' : '报告状态非待诊断');
     if (config.reportStatuses?.length && !config.reportStatuses.some(x => norm(d.status).includes(norm(x)))) reasons.push('报告状态');
     if (config.imageStatuses?.length && !config.imageStatuses.some(x => norm(d.imageStatus).includes(norm(x)))) reasons.push('影像状态');
     if (config.encounterTypes?.length && !config.encounterTypes.some(x => norm(d.patient).includes(norm(x)))) reasons.push('就诊类型');
@@ -959,7 +971,7 @@
     if (!d?.row) return false;
     const current = rowData(d.row);
     if (!isPendingReport(current)) {
-      developerLog('页面点击跳过', { ...debugCandidate(current), reason: current.locked ? '报告已锁定/占用' : '报告状态非待诊断' });
+      developerLog('页面点击跳过', { ...debugCandidate(current), reason: shouldSkipLocked(current) ? '报告已锁定/占用' : '报告状态非待诊断' });
       return false;
     }
     const item = diagnoseOperator(d.row);
@@ -1142,8 +1154,8 @@
       locked: !!(recordView?.locked || d?.locked),
       record
     };
-    if (!isPendingReport(entryData) && !d?.__realtimeNeedsServerStatus) {
-      d.__entryBlocked = entryData.locked ? '报告已锁定/占用' : '报告状态非待诊断';
+    if (shouldSkipLocked(entryData) || (!isPendingReport(entryData) && !d?.__realtimeNeedsServerStatus)) {
+      d.__entryBlocked = shouldSkipLocked(entryData) ? '报告已锁定/占用' : '报告状态非待诊断';
       developerLog('协议进入跳过', { ...debugCandidate(entryData), reason: d.__entryBlocked });
       return false;
     }
@@ -1197,8 +1209,8 @@
       developerLog('进入前硬门禁拒绝', { ...debugCandidate(d), reason: d.__entryBlocked });
       return false;
     }
-    if (!isPendingReport(d) && !d?.__realtimeNeedsServerStatus) {
-      developerLog('进入前硬门禁拒绝', { ...debugCandidate(d), reason: d?.locked ? '报告已锁定/占用' : '报告状态非待诊断' });
+    if (shouldSkipLocked(d) || (!isPendingReport(d) && !d?.__realtimeNeedsServerStatus)) {
+      developerLog('进入前硬门禁拒绝', { ...debugCandidate(d), reason: shouldSkipLocked(d) ? '报告已锁定/占用' : '报告状态非待诊断' });
       return false;
     }
     entryRunning = true;
@@ -1695,7 +1707,9 @@
       age: { min: config.age?.min ?? null, max: config.age?.max ?? null, unlimited: !!config.age?.unlimited },
       applicationTimeMode: config.applicationTime?.mode || 'all',
       applicationTime: { minMinutes: config.applicationTime?.minMinutes ?? null, maxMinutes: config.applicationTime?.maxMinutes ?? null, days: config.applicationTime?.days ?? null, start: config.applicationTime?.start || '' },
-      reportStatusCount: (config.reportStatuses || []).length
+      reportStatusCount: (config.reportStatuses || []).length,
+      skipLockedRecords: config.skipLockedRecords !== false,
+      lockedRecordPolicy: config.skipLockedRecords !== false ? '检测到其他用户锁定时跳过' : '允许尝试，交由服务端校验'
     }, { force: true });
     // 先以当前页面表格为基线，避免打开脚本时因为“不限时间”一次性抢走旧记录。
     lastListFetchAt = Date.now();
@@ -1800,7 +1814,7 @@
         <small style="display:block;color:#909399;margin:-3px 0 7px">候选发现优先使用 WebSocket、状态计数和只读列表协议；默认每个列表补偿周期同步一次当前筛选条件下的可见表格，不会修改报告状态复选框。</small>
         <fieldset><legend>开发者模式</legend><div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap"><label class="jx-dev-toggle"><input type="checkbox" data-f="developerMode"> 开启开发者模式</label><button type="button" data-a="selfCheck">运行自检</button><button type="button" data-a="copyDebug">复制最近诊断记录</button><button type="button" data-a="clearDebug">清空记录</button><span data-a="debugState" style="color:#909399">当前开启（最近10分钟）</span></div><small style="color:#909399">默认开启并自动保留最近10分钟完整调试记录，便于定位候选未及时进入；超过10分钟自动删除。自检只读当前页面、登录会话和状态协议，不修改报告状态。记录不保存 Cookie、Authorization 或密码。</small></fieldset>
         <fieldset><legend>登录账号</legend><div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap"><span>当前账号：<b data-a="currentAccount">读取中</b></span><button type="button" data-a="useCurrentAccount">仅允许当前账号</button><button type="button" data-a="clearAccountLimit">清空限制</button></div><label>允许自动诊断的账号（留空不限）<input data-f="allowedAccounts" placeholder="可填账号编号或登录名，多个用逗号分隔"></label><small style="color:#909399">支持账号编号和登录名；留空时所有登录账号都启用。</small><div style="margin-top:8px;padding-top:7px;border-top:1px dashed #dcdfe6"><label><input type="checkbox" data-f="directLoginEnabled"> 未登录时启用协议登录</label><label>协议登录账号<input data-f="directLoginUsername" autocomplete="username" placeholder="账号编号"></label><label><input type="checkbox" data-f="directLoginOcrEnabled"> 使用本机 OCR 自动填写验证码</label><label>OCR 地址<input data-f="directLoginOcrEndpoint" value="http://127.0.0.1:18766/ocr" placeholder="http://127.0.0.1:18766/ocr"></label><div style="display:flex;gap:6px;margin-top:5px"><button type="button" data-a="directLoginNow">立即协议登录</button></div><small style="color:#909399">密码只在点击登录时临时输入，不写入配置。验证码优先使用本机 ddddocr，识别失败再显示手工输入。</small></div></fieldset>
-        <fieldset><legend>报告/影像状态</legend><div class="jx-checks" data-group="reportStatuses"></div><div class="jx-checks" data-group="imageStatuses"></div></fieldset>
+        <fieldset><legend>报告/影像状态</legend><div class="jx-checks" data-group="reportStatuses"></div><div class="jx-checks" data-group="imageStatuses"></div><label class="jx-check"><input type="checkbox" data-f="skipLockedRecords"> 检测到其他用户锁定的记录时跳过</label><small style="color:#909399">默认开启；关闭后仍要求报告状态为待诊断，再尝试协议校验，服务端拒绝锁定记录时不会强行进入。</small></fieldset>
         <fieldset><legend>患者信息</legend><div class="jx-checks" data-group="encounterTypes"></div><div class="jx-checks" data-group="gender"></div><label class="jx-check"><input type="checkbox" data-f="ageUnlimited"> 年龄不限</label><div class="jx-grid"><label>年龄从<input data-f="ageMin" type="number"></label><label>年龄到<input data-f="ageMax" type="number"></label><label>姓名包含<input data-f="patientNameContains"></label><label>申请单号包含<input data-f="applicationNoContains"></label></div></fieldset>
         <fieldset><legend>检查与机构</legend><div class="jx-checks" data-group="modalities"></div><div class="jx-checks" data-group="applyInstitution"></div><div class="jx-checks" data-group="checkHospitals"></div><div class="jx-checks" data-group="bodyParts"></div><div class="jx-checks" data-group="examNames"></div><div class="jx-exam-head"><span>其他检查项目</span><button type="button" data-a="refreshExamOptions" title="从当前列表更新全部可勾选项目">更新所有可选项目</button></div><div class="jx-checks" data-group="examNamesExtra"></div><small style="color:#909399">检查项目、检查部位、医院和机构均可直接勾选“不限”；权重越大越优先，格式为“项目=权重”，每行一项。</small><label>检查项目权重<textarea data-f="examWeights" rows="4" placeholder="头颅平扫=100&#10;肋骨平扫=10"></textarea></label><label>申请机构权重<textarea data-f="institutionWeights" rows="3" placeholder="机构名称=权重"></textarea></label><label class="jx-check"><input type="checkbox" data-f="preliminaryReportFirst"> 有结论的初写报告优先</label><small style="color:#909399">只识别结论字段；描述、备注不会被当作结论。没有结论的记录仍可处理，只是排序靠后。</small><div class="jx-grid"><label>检查部位最少数量<select data-f="siteMin"><option value="">不限</option><option value="1">1 个</option><option value="2">2 个</option><option value="3">3 个</option><option value="4">4 个</option><option value="5">5 个</option></select></label><label>检查部位最多数量<select data-f="siteMax"><option value="">不限</option><option value="1">1 个</option><option value="2">2 个</option><option value="3">3 个</option><option value="4">4 个</option><option value="5">5 个</option></select></label></div><div class="jx-checks" data-group="diagnosisDoctors"></div><label>审核医生（留空不限）<input data-f="auditDoctors"></label></fieldset>
         <fieldset><legend>申请时间</legend><div class="jx-grid"><label>快捷范围<select data-f="applicationTimeMode"><option value="window">最近 5–30 分钟</option><option value="all">不限</option><option value="today">当天</option><option value="recent">最近 N 天</option><option value="fromTime">当天从指定时间</option></select></label><label>最早分钟<input data-f="applicationTimeMin" type="number" min="0" step="1"></label><label>最晚分钟<input data-f="applicationTimeMax" type="number" min="1" step="1"></label><label>最近天数<input data-f="applicationTimeDays" type="number" min="0" step="1"></label><label>开始时间<input data-f="applicationTimeStart" type="time"></label></div><small style="color:#909399">“最近 5–30 分钟”表示 5 分钟内不处理，超过 30 分钟也不处理。</small></fieldset>
@@ -1847,7 +1861,7 @@
     function getGroup(name) { const all = [...box.querySelectorAll(`[data-group-name="${name}"]:checked`)].map(x => x.value); return all.includes('不限') ? [] : all; }
     function render() {
       drawGroups();
-      f('enabled').checked = !!config.enabled; f('developerMode').checked = !!config.developerMode; f('pageQueryRefresh').checked = !!config.pageQueryRefresh; f('pollMs').value = config.pollMs; f('statusProbeMs').value = config.statusProbeMs || 5000; f('listHeartbeatMs').value = config.listHeartbeatMs || 15000; f('clickDelayMs').value = config.clickDelayMs;
+      f('enabled').checked = !!config.enabled; f('developerMode').checked = !!config.developerMode; f('pageQueryRefresh').checked = !!config.pageQueryRefresh; f('skipLockedRecords').checked = config.skipLockedRecords !== false; f('pollMs').value = config.pollMs; f('statusProbeMs').value = config.statusProbeMs || 5000; f('listHeartbeatMs').value = config.listHeartbeatMs || 15000; f('clickDelayMs').value = config.clickDelayMs;
       const debugState = box.querySelector('[data-a="debugState"]'); if (debugState) debugState.textContent = developerModeStateText();
       const currentAccount = box.querySelector('[data-a="currentAccount"]'); if (currentAccount) currentAccount.textContent = accountDisplay();
       f('allowedAccounts').value = listValue(config.allowedAccounts);
@@ -1864,7 +1878,7 @@
       const ps = profiles(); f('profile').innerHTML = '<option value="">选择已保存方案</option>' + Object.keys(ps).sort().map(x => `<option>${esc(x)}</option>`).join('');
     }
     function read() {
-      config.enabled = f('enabled').checked; config.developerMode = f('developerMode').checked; config.pageQueryRefresh = f('pageQueryRefresh').checked; config.pollMs = Math.max(1000, Number(f('pollMs').value) || 2000); config.statusProbeMs = Math.max(3000, Number(f('statusProbeMs').value) || 5000); config.listHeartbeatMs = Math.max(10000, Number(f('listHeartbeatMs').value) || 15000); config.clickDelayMs = Number(f('clickDelayMs').value) || 0; config.entryMode = f('entryMode').value || 'protocol-first';
+      config.enabled = f('enabled').checked; config.developerMode = f('developerMode').checked; config.pageQueryRefresh = f('pageQueryRefresh').checked; config.skipLockedRecords = f('skipLockedRecords').checked; config.pollMs = Math.max(1000, Number(f('pollMs').value) || 2000); config.statusProbeMs = Math.max(3000, Number(f('statusProbeMs').value) || 5000); config.listHeartbeatMs = Math.max(10000, Number(f('listHeartbeatMs').value) || 15000); config.clickDelayMs = Number(f('clickDelayMs').value) || 0; config.entryMode = f('entryMode').value || 'protocol-first';
       config.allowedAccounts = parseList(f('allowedAccounts').value);
       config.directLogin = { enabled: f('directLoginEnabled').checked, username: f('directLoginUsername').value.trim(), ocrEnabled: f('directLoginOcrEnabled').checked, ocrEndpoint: f('directLoginOcrEndpoint').value.trim() || 'http://127.0.0.1:18766/ocr' };
       for (const n of ['reportStatuses','imageStatuses','encounterTypes','gender','modalities','examNames','examNamesExtra','checkHospitals','bodyParts','diagnosisDoctors']) config[n] = getGroup(n);

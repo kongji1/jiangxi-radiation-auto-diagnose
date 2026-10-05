@@ -16,7 +16,7 @@ const quickGuide = fs.readFileSync(path.join(root, 'docs', 'GPT6_QUICK_MAINTENAN
 execFileSync(process.execPath, ['--check', sourcePath], { stdio: 'inherit' });
 
 const required = [
-  ['metadata version', /@version\s+0\.8\.41/],
+  ['metadata version', /@version\s+0\.8\.42/],
   ['runtime version telemetry', /developerLog\('运行版本'[\s\S]+SCRIPT_VERSION/],
   ['route re-entry restart', /isMonitorRoute\(path\) && changed[\s\S]+运行时重启[\s\S]+start\(\{ preserveDiagnosisLock: true \}\)/],
   ['route re-entry preserves diagnosis lock', /start\(\{ preserveDiagnosisLock: true \}\)/],
@@ -41,6 +41,9 @@ const required = [
   ['read-only entry assertion', /assertAllowEnter/],
   ['strict pending gate', /pendingCode/],
   ['locked-record gate', /recordLockState/],
+  ['locked-record setting', /skipLockedRecords/],
+  ['locked-record setting UI', /检测到其他用户锁定的记录时跳过/],
+  ['locked-record realtime hard gate', /shouldSkipLocked\(entryData\) \|\| \(!isPendingReport\(entryData\)/],
   ['age-unlimited setting', /ageUnlimited/],
   ['exam weights', /examWeights/],
   ['institution weights', /institutionWeights/],
@@ -119,6 +122,28 @@ if (!/已有客户处于诊断中，仅继续观察列表/.test(source) || !/仅
 if (/password\s*[:=]\s*['"][^'"]+['"]/.test(source)) {
   throw new Error('source contract failed: possible plaintext password literal');
 }
+// Exercise the lock policy in isolation so the setting cannot silently become
+// a label-only option. The default skips an explicitly locked pending record,
+// while disabling the option still leaves the strict pending-status gate in
+// place; a diagnosing record remains blocked in either mode.
+const lockStart = source.indexOf('  function lockedRecordDetected');
+const lockEnd = source.indexOf('  function matchFailureReasons', lockStart);
+if (lockStart < 0 || lockEnd < 0) throw new Error('source contract failed: lock policy functions missing');
+const lockPolicy = new Function('norm', 'recordLockState', 'config', `${source.slice(lockStart, lockEnd)}; return { lockedRecordDetected, shouldSkipLocked, isPendingReport };`)(
+  value => String(value ?? '').trim(),
+  record => !!record?.isLock,
+  { skipLockedRecords: true }
+);
+if (lockPolicy.isPendingReport({ statusCode: '102501', locked: true })) throw new Error('source contract failed: default lock skip missing');
+if (!lockPolicy.shouldSkipLocked({ status: '当前报告已被其他用户锁定' })) throw new Error('source contract failed: lock text detection missing');
+const unlockedPolicy = new Function('norm', 'recordLockState', 'config', `${source.slice(lockStart, lockEnd)}; return { shouldSkipLocked, isPendingReport };`)(
+  value => String(value ?? '').trim(),
+  record => !!record?.isLock,
+  { skipLockedRecords: false }
+);
+if (unlockedPolicy.shouldSkipLocked({ statusCode: '102501', locked: true })) throw new Error('source contract failed: disabled lock skip still active');
+if (!unlockedPolicy.isPendingReport({ statusCode: '102501', locked: true })) throw new Error('source contract failed: disabled lock skip does not reach pending gate');
+if (unlockedPolicy.isPendingReport({ statusCode: '102502', locked: true })) throw new Error('source contract failed: diagnosing status bypassed');
 if (!/raw\.githubusercontent\.com/.test(updateTool)) throw new Error('GitHub update tool missing raw URL');
 const hotUpdateHelper = fs.readFileSync(path.join(root, 'tools', 'configure-github-hot-update.mjs'), 'utf8');
 if (!/readFileSync\(sourcePath, 'utf8'\)/.test(hotUpdateHelper) || !/writeFileSync\(sourcePath, source/.test(hotUpdateHelper)) {
@@ -130,7 +155,7 @@ if (!/def captcha_answer/.test(ocrServer) || !/fullmatch/.test(ocrServer) || !/1
 }
 
 const state = JSON.parse(fs.readFileSync(path.join(root, 'PROJECT_STATE.json'), 'utf8'));
-if (state.version !== '0.8.41') throw new Error(`PROJECT_STATE version mismatch: ${state.version}`);
+if (state.version !== '0.8.42') throw new Error(`PROJECT_STATE version mismatch: ${state.version}`);
 if (state.performance?.realtimeListMinCooldownMs !== 500) throw new Error('PROJECT_STATE realtime cooldown mismatch');
 if (state.performance?.developerModeDefault !== true) throw new Error('PROJECT_STATE developer mode default mismatch');
 if (state.performance?.developerDebugRetentionMs !== 600000) throw new Error('PROJECT_STATE developer retention mismatch');
@@ -140,7 +165,7 @@ if (state.performance?.credentialValuesPersisted !== false) throw new Error('PRO
 if (state.performance?.cookieNameCaseInsensitive !== true) throw new Error('PROJECT_STATE cookie case-insensitive lookup mismatch');
 if (state.lastObservedRuntime?.statusProbe !== 'code=2002 repeated; auth headers absent in script context') throw new Error('PROJECT_STATE runtime evidence mismatch');
 if (state.lastObservedRuntime?.entryEventsObserved !== 0) throw new Error('PROJECT_STATE runtime entry evidence mismatch');
-if (!readme.includes('源码版本：`0.8.41`')) throw new Error('README version mismatch');
+if (!readme.includes('源码版本：`0.8.42`')) throw new Error('README version mismatch');
 if (!readme.includes('127.0.0.1:18766')) throw new Error('README OCR endpoint missing');
 if (!readme.includes('GPT6_MAINTENANCE.md')) throw new Error('README GPT-6 guide missing');
 if (!gpt6Guide.includes('dispatchDelayMs') || !gpt6Guide.includes('diagnosisActive')) throw new Error('GPT-6 maintenance guide incomplete');

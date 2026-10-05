@@ -1,23 +1,27 @@
 {
   "project": "江西省县域医共体 - 自动诊断候选",
   "source": "jiangxi-radiation-auto-diagnose.user.js",
-  "version": "0.8.41",
+  "version": "0.8.42",
   "snapshotDate": "2026-10-01",
   "sourceOfTruth": "jiangxi-radiation-auto-diagnose.user.js",
   "handoff": "docs/AI_HANDOFF.md",
   "protocol": "docs/PROTOCOL.md",
   "verification": "docs/VERIFICATION.md",
   "tampermonkeyLoadedVersion": "not independently confirmed; browser storage exposes directLogin OCR fields but not the metadata version",
-    "liveVerification": "Source contract, syntax, release-failure, and arithmetic CAPTCHA bridge tests pass for 0.8.41. Developer events retain full candidate fields locally for a rolling ten-minute window, are periodically purged and persisted, record credential shape diagnostics without persisting raw credentials, snapshot selected filter values at runtime start, and emit an explicit runtime version event. A live refresh previously reproduced a native protocol-password prompt while the rendered page already showed the logged-in user and remained /radiation; the read-only app-shell guard suppresses that false prompt. Repeated statusNum code=2002 still records 会话自愈保持当前页 with redirected:false. The 2026-10-05 Edge log showed uppercase AUTH/LOGINCODE/WORKSTATION cookies while script auth headers were absent and statusNum returned 2002; 0.8.41 fixes case-insensitive cookie lookup. Real OCR recognition, protocol login, and the newly added dynamic header filters remain unverified in the current browser runtime.",
+  "liveVerification": "Source contract, syntax, release-failure, and arithmetic CAPTCHA bridge tests pass for 0.8.42. Developer events retain full candidate fields locally for a rolling ten-minute window, are periodically purged and persisted, record credential shape diagnostics without persisting raw credentials, snapshot selected filter values at runtime start, and emit an explicit runtime version event. A live refresh previously reproduced a native protocol-password prompt while the rendered page already showed the logged-in user and remained /radiation; the read-only app-shell guard suppresses that false prompt. Repeated statusNum code=2002 still records 会话自愈保持当前页 with redirected:false. The 2026-10-05 Edge log showed uppercase AUTH/LOGINCODE/WORKSTATION cookies while script auth headers were absent and statusNum returned 2002; 0.8.42 fixes case-insensitive cookie lookup. Real OCR recognition, protocol login, and the newly added dynamic header filters remain unverified in the current browser runtime. 配置面板新增“检测到其他用户锁定的记录时跳过”，默认开启；关闭后仅放宽客户端锁定跳过，仍受待诊断状态和服务端允许进入校验。",
   "lastObservedRuntime": {
     "capturedAt": "2026-10-05T10:55:08+08:00",
     "source": "Edge Default Tampermonkey local extension storage",
     "scriptVersionObservedInSourceRecord": "0.8.40",
     "statusProbe": "code=2002 repeated; auth headers absent in script context",
-    "cookieNamesObserved": ["LOGINCODE", "AUTH", "WORKSTATION"],
+    "cookieNamesObserved": [
+      "LOGINCODE",
+      "AUTH",
+      "WORKSTATION"
+    ],
     "pageQueryFallback": "native page query completed about every 15 seconds",
     "entryEventsObserved": 0,
-    "interpretation": "The page remained usable, but protocol list/entry could not authenticate because cookie lookup was case-sensitive; fix is included in 0.8.41 and must be reloaded before measuring again."
+    "interpretation": "The page remained usable, but protocol list/entry could not authenticate because cookie lookup was case-sensitive; fix is included in 0.8.42 and must be reloaded before measuring again."
   },
   "performance": {
     "localScanMs": 2000,
@@ -69,10 +73,12 @@
       "occupyStatus",
       "occupyUser",
       "isOccupied"
-    ]
+    ],
+    "skipLockedRecordsDefault": true,
+    "skipLockedRecordsConfigurable": true
   },
   "nextActions": [
-    "在 Tampermonkey 中加载 0.8.41 并确认脚本版本",
+    "在 Tampermonkey 中加载 0.8.42 并确认脚本版本",
     "登录会话验证协议列表和 WebSocket 实时字段",
     "用有结论/无结论、不同检查项目和申请机构记录验证排序",
     "用年龄不限和年龄范围分别做边界反向测试",
