@@ -11,6 +11,8 @@ try {
   if ($LASTEXITCODE -ne 0) { throw 'JavaScript syntax check failed' }
   node .\tests\source-contract.test.mjs
   if ($LASTEXITCODE -ne 0) { throw 'Source contract check failed' }
+  node .\tests\lifecycle-diagnostics.test.mjs
+  if ($LASTEXITCODE -ne 0) { throw 'Lifecycle diagnostics check failed' }
   python .\tests\captcha_ocr.test.py
   if ($LASTEXITCODE -ne 0) { throw 'OCR tests failed' }
   if (-not $SkipOcrHealth) {

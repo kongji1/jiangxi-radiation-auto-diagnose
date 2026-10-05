@@ -21,12 +21,13 @@
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\gpt6-quick-maintenance.ps1 -SkipOcrHealth
 ```
 
-脚本会核对源码和状态版本，执行语法、源码契约、原生失败保护和 OCR 测试。开发过程中即使工作树有修改也会输出 `READY` 并标记 `workingTree=dirty`；提交前使用 `-RequireClean` 才要求工作树干净。
+脚本会核对源码和状态版本，执行语法、源码契约、生命周期诊断、原生失败保护和 OCR 测试。开发过程中即使工作树有修改也会输出 `READY` 并标记 `workingTree=dirty`；提交前使用 `-RequireClean` 才要求工作树干净。
 
 ## 2–4 分钟：按证据定位
 
 - 候选没有出现：先看 `实时推送收到`、`实时列表请求发起`、`列表请求结果`。
 - 候选出现但没进入：看 `配置门禁快照`、`候选过滤`、`进入前硬门禁拒绝`、`协议进入拒绝`。
+- 候选先符合规则、随后被别人进入：按同一 `lifecycleKey` 串联 `候选首次观察`、`候选等待进入`、`协议进入开始`、`协议进入拒绝`、`候选被其他用户占用` 或 `候选未在后续列表出现`；重点比较 `firstSeenAt`、`eligibleAt`、`dispatchDelayMs`、`durationMs`、前后 `status/statusCode/locked/doctor`。
 - 返回 2002：看 `认证上下文` 和 `协议响应认证上下文`，只比较存在性、长度、短哈希和请求路径，不读取原始凭证。
 - 页面列表晚更新：区分协议列表结果、页面查询心跳和 DOM 行状态，不能把手工刷新时间当成候选首次出现时间。
 - 报告锁定：默认跳过其它用户锁定的记录；若设置关闭该选项，也只允许继续到服务端待诊断和 `assertAllowEnter` 校验，不能用页面点击绕过。

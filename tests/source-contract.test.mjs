@@ -16,7 +16,7 @@ const quickGuide = fs.readFileSync(path.join(root, 'docs', 'GPT6_QUICK_MAINTENAN
 execFileSync(process.execPath, ['--check', sourcePath], { stdio: 'inherit' });
 
 const required = [
-  ['metadata version', /@version\s+0\.8\.42/],
+  ['metadata version', /@version\s+0\.8\.43/],
   ['runtime version telemetry', /developerLog\('运行版本'[\s\S]+SCRIPT_VERSION/],
   ['route re-entry restart', /isMonitorRoute\(path\) && changed[\s\S]+运行时重启[\s\S]+start\(\{ preserveDiagnosisLock: true \}\)/],
   ['route re-entry preserves diagnosis lock', /start\(\{ preserveDiagnosisLock: true \}\)/],
@@ -43,6 +43,11 @@ const required = [
   ['locked-record gate', /recordLockState/],
   ['locked-record setting', /skipLockedRecords/],
   ['locked-record setting UI', /检测到其他用户锁定的记录时跳过/],
+  ['candidate lifecycle index', /candidateLifecycle/],
+  ['candidate takeover transition', /候选被其他用户占用/],
+  ['candidate disappearance evidence', /候选未在后续列表出现/],
+  ['server rejection detail', /serverMessage: serverMessage\.slice/],
+  ['list request correlation', /requestId = `list-/],
   ['locked-record realtime hard gate', /shouldSkipLocked\(entryData\) \|\| \(!isPendingReport\(entryData\)/],
   ['age-unlimited setting', /ageUnlimited/],
   ['exam weights', /examWeights/],
@@ -155,7 +160,7 @@ if (!/def captcha_answer/.test(ocrServer) || !/fullmatch/.test(ocrServer) || !/1
 }
 
 const state = JSON.parse(fs.readFileSync(path.join(root, 'PROJECT_STATE.json'), 'utf8'));
-if (state.version !== '0.8.42') throw new Error(`PROJECT_STATE version mismatch: ${state.version}`);
+if (state.version !== '0.8.43') throw new Error(`PROJECT_STATE version mismatch: ${state.version}`);
 if (state.performance?.realtimeListMinCooldownMs !== 500) throw new Error('PROJECT_STATE realtime cooldown mismatch');
 if (state.performance?.developerModeDefault !== true) throw new Error('PROJECT_STATE developer mode default mismatch');
 if (state.performance?.developerDebugRetentionMs !== 600000) throw new Error('PROJECT_STATE developer retention mismatch');
@@ -165,13 +170,13 @@ if (state.performance?.credentialValuesPersisted !== false) throw new Error('PRO
 if (state.performance?.cookieNameCaseInsensitive !== true) throw new Error('PROJECT_STATE cookie case-insensitive lookup mismatch');
 if (state.lastObservedRuntime?.statusProbe !== 'code=2002 repeated; auth headers absent in script context') throw new Error('PROJECT_STATE runtime evidence mismatch');
 if (state.lastObservedRuntime?.entryEventsObserved !== 0) throw new Error('PROJECT_STATE runtime entry evidence mismatch');
-if (!readme.includes('源码版本：`0.8.42`')) throw new Error('README version mismatch');
+if (!readme.includes('源码版本：`0.8.43`')) throw new Error('README version mismatch');
 if (!readme.includes('127.0.0.1:18766')) throw new Error('README OCR endpoint missing');
 if (!readme.includes('GPT6_MAINTENANCE.md')) throw new Error('README GPT-6 guide missing');
 if (!gpt6Guide.includes('dispatchDelayMs') || !gpt6Guide.includes('diagnosisActive')) throw new Error('GPT-6 maintenance guide incomplete');
-if (!/source-contract\.test\.mjs/.test(releaseTool) || !/captcha_ocr\.test\.py/.test(releaseTool)) throw new Error('release verification tool incomplete');
+if (!/source-contract\.test\.mjs/.test(releaseTool) || !/lifecycle-diagnostics\.test\.mjs/.test(releaseTool) || !/captcha_ocr\.test\.py/.test(releaseTool)) throw new Error('release verification tool incomplete');
 if (!/git ls-remote/.test(publishTool) || !/git push origin/.test(publishTool) || !/raw\.githubusercontent\.com/.test(publishTool)) throw new Error('GitHub publish tool incomplete');
-if (!/node --check/.test(quickMaintenance) || !/release-failure\.test\.mjs/.test(quickMaintenance) || !/READY/.test(quickMaintenance)) throw new Error('GPT-6 quick maintenance tool incomplete');
+if (!/node --check/.test(quickMaintenance) || !/lifecycle-diagnostics\.test\.mjs/.test(quickMaintenance) || !/release-failure\.test\.mjs/.test(quickMaintenance) || !/READY/.test(quickMaintenance)) throw new Error('GPT-6 quick maintenance tool incomplete');
 if (!/RequireClean/.test(quickMaintenance) || !/workingTree/.test(quickMaintenance)) throw new Error('GPT-6 quick maintenance dirty mode incomplete');
 if (!quickGuide.includes('五分钟') || !quickGuide.includes('配置门禁快照') || !quickGuide.includes('认证上下文')) throw new Error('GPT-6 quick maintenance guide incomplete');
 

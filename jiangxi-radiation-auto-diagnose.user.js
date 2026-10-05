@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         江西省县域医共体 - 自动诊断候选
 // @namespace    local.jiangxi.radiation
-// @version      0.8.42
+// @version      0.8.43
 // @updateURL   https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @downloadURL https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @description  以页面实时推送为主、轻量协议探测为兜底，按可配置规则识别后优先通过系统协议进入诊断；支持可控开发者诊断日志。
@@ -20,7 +20,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.8.42';
+  const SCRIPT_VERSION = '0.8.43';
 
   // 所有业务规则和页面定位都集中在这里，也可以从表头设置弹窗进入配置面板修改。
   const DEFAULT_CONFIG = {
@@ -142,6 +142,10 @@
   let lastObservedPath = '';
   let accountGateState = '';
   const seen = new Map();
+  // 开发者诊断用的候选生命周期索引。它只保留内存中的短期关联，不参与
+  // 进入决策，也不写入独立存储；详细事件仍由 developerLog 按十分钟窗口落盘。
+  const candidateLifecycle = new Map();
+  let candidateSnapshotSequence = 0;
   const REALTIME_HINT_EVENT = '__jx_auto_diagnose_ws_hint_v1';
   const DEBUG_EVENT_LIMIT = 240;
   const DEBUG_RETENTION_MS = 10 * 60 * 1000;
@@ -1073,9 +1077,17 @@
   async function fetchRadiationRecords(options = {}) {
     // 列表接口只读，不会改变报告状态；同时用于协议兜底和更新可选项目。
     const startedAt = Date.now();
+    const requestId = `list-${startedAt}-${debugHash(`${options.reason || 'list'}|${debugTag(options.match)}`)}`;
     developerLog('列表请求开始', {
+      requestId,
       source: options.reason || 'list', narrow: !!options.match,
-      pageSize: Math.max(1, Math.min(100, Number(options.pageSize) || 30))
+      candidateTag: debugTag(options.match),
+      pageSize: Math.max(1, Math.min(100, Number(options.pageSize) || 30)),
+      hintAt: options.hintAt || null,
+      dispatchDelayMs: options.hintAt ? Math.max(0, startedAt - Number(options.hintAt) || 0) : null,
+      diagnosisActive,
+      entryRunning,
+      statusProbeFailures
     });
     try {
       await ensureSessionIdentity();
@@ -1087,7 +1099,7 @@
       // 某些部署对组合筛选返回 2002。退回到轻量的全量最近列表，再由客户端过滤，
       // 避免服务端筛选错误让实时轮询进入退避状态。
       if (json?.code === 2002 && !options.ignoreStatusFilter) {
-        developerLog('列表筛选退回客户端过滤', { source: options.reason || 'list', code: json.code });
+        developerLog('列表筛选退回客户端过滤', { requestId, source: options.reason || 'list', code: json.code });
         ({ response, payload: json } = await fetchJson('/api/ct/rays/rep/list', {
           method: 'POST', credentials: 'include',
           headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
@@ -1096,7 +1108,7 @@
       }
       const records = json?.data?.records || json?.data?.list || (Array.isArray(json?.data) ? json.data : []);
       if (!response.ok || json?.code !== 200 || !Array.isArray(records)) {
-        developerLog('列表请求结果', { source: options.reason || 'list', ok: false, httpOk: !!response.ok, code: json?.code ?? null, count: 0, durationMs: Date.now() - startedAt });
+        developerLog('列表请求结果', { requestId, source: options.reason || 'list', ok: false, httpOk: !!response.ok, httpStatus: response.status ?? null, code: json?.code ?? null, count: 0, durationMs: Date.now() - startedAt, diagnosisActive, entryRunning });
         // When the protocol session is rejected but the rendered workbench is
         // still usable, let the page's own Axios request refresh its session
         // headers once.  This is a bounded visible-page fallback, not a new
@@ -1107,11 +1119,11 @@
         }
         return [];
       }
-      developerLog('列表请求结果', { source: options.reason || 'list', ok: true, count: records.length, durationMs: Date.now() - startedAt });
+      developerLog('列表请求结果', { requestId, source: options.reason || 'list', ok: true, httpStatus: response.status ?? null, code: json?.code ?? null, count: records.length, durationMs: Date.now() - startedAt, diagnosisActive, entryRunning });
       return records;
     } catch (e) {
       console.warn('[自动诊断] 列表协议查询失败', String(e));
-      developerLog('列表请求异常', { source: options.reason || 'list', error: debugError(e), durationMs: Date.now() - startedAt });
+      developerLog('列表请求异常', { requestId, source: options.reason || 'list', error: debugError(e), durationMs: Date.now() - startedAt, diagnosisActive, entryRunning });
       return [];
     }
   }
@@ -1154,9 +1166,13 @@
       locked: !!(recordView?.locked || d?.locked),
       record
     };
+    const lifecycle = observeCandidateLifecycle(entryData, 'assertAllowEnter', {
+      eligible: isPendingReport(entryData) && !shouldSkipLocked(entryData),
+      stage: 'assertAllowEnter'
+    });
     if (shouldSkipLocked(entryData) || (!isPendingReport(entryData) && !d?.__realtimeNeedsServerStatus)) {
       d.__entryBlocked = shouldSkipLocked(entryData) ? '报告已锁定/占用' : '报告状态非待诊断';
-      developerLog('协议进入跳过', { ...debugCandidate(entryData), reason: d.__entryBlocked });
+      developerLog('协议进入跳过', { ...debugCandidate(entryData, { lifecycle: lifecycleDebug(lifecycle) }), reason: d.__entryBlocked });
       return false;
     }
     if (!repUid) {
@@ -1165,7 +1181,8 @@
       return false;
     }
     const startedAt = Date.now();
-    developerLog('协议进入开始', { ...debugCandidate(entryData), reason: '校验允许进入' });
+    if (lifecycle) lifecycle.attemptCount = Number(lifecycle.attemptCount || 0) + 1;
+    developerLog('协议进入开始', { ...debugCandidate(entryData, { lifecycle: lifecycleDebug(lifecycle) }), reason: '校验允许进入' });
     try {
       await ensureSessionIdentity();
       const url = `/api/ct/rays/rep/assertAllowEnter?repUid=${encodeURIComponent(String(repUid))}`;
@@ -1175,22 +1192,38 @@
       const protocolAllowed = protocolAllowsEntry(payload);
       if (!response.ok || payload?.code !== 200 || !protocolAllowed) {
         console.warn('[自动诊断] 系统不允许进入诊断', { code: payload?.code, message: payload?.message });
+        const rejectReason = lockedMessage ? '报告已锁定/占用' : '业务校验拒绝';
         if (lockedMessage || (response.ok && payload?.code === 200 && payload?.data !== undefined && !protocolAllowed)) d.__entryBlocked = lockedMessage ? '报告已锁定/占用' : '业务校验未允许';
-        developerLog('协议进入拒绝', { ...debugCandidate(entryData), code: payload?.code ?? null, reason: lockedMessage ? '报告已锁定/占用' : '业务校验拒绝', durationMs: Date.now() - startedAt });
+        const serverData = lockedMessage ? { ...entryData, status: serverMessage || entryData.status, locked: true } : entryData;
+        const serverLifecycle = observeCandidateLifecycle(serverData, 'assertAllowEnter', {
+          eligible: false,
+          stage: 'server-rejected',
+          previousEligible: !!lifecycle?.eligibleAt
+        });
+        developerLog('协议进入拒绝', {
+          ...debugCandidate(entryData, { lifecycle: lifecycleDebug(serverLifecycle || lifecycle) }),
+          code: payload?.code ?? null,
+          httpStatus: response.status ?? null,
+          reason: rejectReason,
+          serverMessage: serverMessage.slice(0, 240),
+          protocolAllowed,
+          responseDataShape: payload?.data == null ? 'none' : Array.isArray(payload.data) ? 'array' : typeof payload.data,
+          durationMs: Date.now() - startedAt
+        }, { force: lockedMessage });
         return false;
       }
       const applyOrgCode = record?.applyOrgCode || record?.applyOrg || d?.row?.dataset?.applyOrgCode || '';
       const query = new URLSearchParams({ id: String(repUid) });
       if (applyOrgCode) query.set('applyOrgCode', String(applyOrgCode));
       console.info('[自动诊断] 协议校验通过，打开诊断页', { hasReportId: true });
-      developerLog('协议进入成功', { ...debugCandidate(entryData), durationMs: Date.now() - startedAt });
+      developerLog('协议进入成功', { ...debugCandidate(entryData, { lifecycle: lifecycleDebug(lifecycle) }), durationMs: Date.now() - startedAt });
       // 直接使用业务路由，诊断页会按系统原流程继续获取并锁定记录。
       diagnosisActive = true;
       pageWindow().location.href = `/radiation/report?${query.toString()}`;
       return true;
     } catch (e) {
       console.warn('[自动诊断] 协议进入失败，将尝试页面按钮', { error: String(e) });
-      developerLog('协议进入异常', { ...debugCandidate(entryData), error: debugError(e), durationMs: Date.now() - startedAt });
+      developerLog('协议进入异常', { ...debugCandidate(entryData, { lifecycle: lifecycleDebug(lifecycle) }), error: debugError(e), durationMs: Date.now() - startedAt });
       return false;
     }
   }
@@ -1259,9 +1292,149 @@
     for (const key of dataKeys(d)) seen.set(key, Date.now());
     while (seen.size > Number(config.seenLimit || 500)) seen.delete(seen.keys().next().value);
   }
-  async function processRemoteRecords(records) {
+
+  function lifecycleKey(d) {
+    const recordId = d?.record?.repUid || d?.record?.reportUid || d?.record?.reportId || d?.record?.id;
+    if (recordId != null && String(recordId)) return `rep:${String(recordId)}`;
+    return dataKeys(d)[0] || debugTag(d);
+  }
+
+  function lifecycleSnapshot(d) {
+    return {
+      status: norm(d?.status || d?.record?.reportStatus || d?.record?.reportStatusName || d?.record?.checkStatusName),
+      statusCode: norm(d?.statusCode || d?.record?.reportStatusCode || d?.record?.checkStatusCode || d?.record?.statusCode),
+      locked: lockedRecordDetected(d),
+      doctor: norm(d?.doctor || d?.diagnosisDoctor || d?.record?.reportDoc),
+      recordId: d?.record?.repUid || d?.record?.reportUid || d?.record?.reportId || d?.record?.id || '',
+      applicationNo: norm(d?.applicationNo),
+      applyTime: norm(d?.applyTime)
+    };
+  }
+
+  function lifecycleDebug(state) {
+    if (!state) return {};
+    return {
+      lifecycleKey: state.key,
+      firstSeenAt: new Date(state.firstSeenAt).toISOString(),
+      lastSeenAt: new Date(state.lastSeenAt).toISOString(),
+      firstSource: state.firstSource,
+      lastSource: state.lastSource,
+      firstToLastMs: Math.max(0, state.lastSeenAt - state.firstSeenAt),
+      eligibleAt: state.eligibleAt ? new Date(state.eligibleAt).toISOString() : '',
+      firstEligibleAt: state.everEligibleAt ? new Date(state.everEligibleAt).toISOString() : '',
+      eligibleWaitMs: state.everEligibleAt ? Math.max(0, state.lastSeenAt - state.everEligibleAt) : null,
+      currentlyEligible: !!state.eligibleAt,
+      lastStage: state.lastStage || '',
+      attemptCount: state.attemptCount || 0
+    };
+  }
+
+  function pruneCandidateLifecycle(now = Date.now()) {
+    const cutoff = now - DEBUG_RETENTION_MS;
+    for (const [key, state] of candidateLifecycle) {
+      if (!state || state.lastSeenAt < cutoff) candidateLifecycle.delete(key);
+    }
+    while (candidateLifecycle.size > Number(config.seenLimit || 500)) candidateLifecycle.delete(candidateLifecycle.keys().next().value);
+  }
+
+  function observeCandidateLifecycle(d, source, meta = {}) {
+    const key = lifecycleKey(d);
+    if (!key) return null;
+    const now = Date.now();
+    pruneCandidateLifecycle(now);
+    const current = lifecycleSnapshot(d);
+    const failedRules = Array.isArray(meta.failedRules) ? meta.failedRules : matchFailureReasons(d);
+    const eligible = meta.eligible === true || (!failedRules.length && !shouldSkipLocked(d));
+    let state = candidateLifecycle.get(key);
+    if (!state) {
+      state = {
+        key,
+        firstSeenAt: now,
+        lastSeenAt: now,
+        firstSource: source,
+        lastSource: source,
+        eligibleAt: eligible ? now : 0,
+        everEligibleAt: eligible ? now : 0,
+        lastStage: meta.stage || 'observed',
+        attemptCount: 0,
+        snapshot: current,
+        data: d,
+        lastSnapshotSequence: meta.snapshotSequence || 0
+      };
+      candidateLifecycle.set(key, state);
+      developerLog('候选首次观察', {
+        ...debugCandidate(d, { source, lifecycle: lifecycleDebug(state), failedRules }),
+        reason: eligible ? '当前规则通过' : '当前规则未通过'
+      }, { force: true });
+      return state;
+    }
+
+    const previous = state.snapshot || {};
+    const previousData = state.data;
+    const statusChanged = previous.status !== current.status || previous.statusCode !== current.statusCode;
+    const lockChanged = previous.locked !== current.locked;
+    const doctorChanged = previous.doctor !== current.doctor;
+    state.lastSeenAt = now;
+    state.lastSource = source;
+    state.lastStage = meta.stage || state.lastStage || 'observed';
+    state.snapshot = current;
+    state.data = d;
+    state.lastSnapshotSequence = meta.snapshotSequence || state.lastSnapshotSequence || 0;
+    if (!state.eligibleAt && eligible) state.eligibleAt = now;
+    if (!state.everEligibleAt && eligible) state.everEligibleAt = now;
+    if (meta.attempted) state.attemptCount = Number(state.attemptCount || 0) + 1;
+
+    const becameOccupied = (statusChanged || lockChanged || doctorChanged) &&
+      (current.locked || /诊断中|待审核|审核中|占用|锁定/.test(current.status) || !!current.doctor) &&
+      (state.everEligibleAt || meta.previousEligible);
+    if (becameOccupied) {
+      developerLog('候选被其他用户占用', {
+        source,
+        reason: current.locked || /锁定|占用/.test(current.status) ? '锁定或占用状态' : '状态变为诊断中/已有诊断医生',
+        previous: debugCandidate(previousData, { source: state.firstSource, lifecycle: lifecycleDebug(state) }),
+        current: debugCandidate(d, { source, lifecycle: lifecycleDebug(state) }),
+        transition: { statusChanged, lockChanged, doctorChanged }
+      }, { force: true });
+    } else if (statusChanged || lockChanged || doctorChanged) {
+      developerLog('候选状态变化', {
+        source,
+        previous: debugCandidate(previousData, { source: state.firstSource, lifecycle: lifecycleDebug(state) }),
+        current: debugCandidate(d, { source, lifecycle: lifecycleDebug(state) }),
+        transition: { statusChanged, lockChanged, doctorChanged }
+      }, { force: true });
+    }
+    return state;
+  }
+
+  function reconcileCandidateSnapshot(records, source, snapshotSequence, options = {}) {
+    const now = Date.now();
+    const currentKeys = new Set((records || []).map(record => lifecycleKey(recordData(record))).filter(Boolean));
+    // 只有完整的常规列表才记录“本次响应中未出现”。窄列表、WebSocket 线索
+    // 和分页结果不能据此断定客户已被别人抢先进入，避免制造误诊日志。
+    if (!options.complete) return;
+    for (const state of candidateLifecycle.values()) {
+      if (state.lastSnapshotSequence === snapshotSequence || !state.eligibleAt || currentKeys.has(state.key)) continue;
+      if (now - state.lastSeenAt > DEBUG_RETENTION_MS) continue;
+      const disappearedAt = now;
+      developerLog('候选未在后续列表出现', {
+        source,
+        reason: '之前符合规则的候选未出现在本次完整响应，可能已被其它用户进入或离开当前筛选窗口',
+        lifecycle: lifecycleDebug({ ...state, lastSeenAt: disappearedAt }),
+        previous: debugCandidate(state.data, { source: state.lastSource }),
+        elapsedSinceLastSeenMs: Math.max(0, disappearedAt - state.lastSeenAt),
+        snapshotCount: Array.isArray(records) ? records.length : 0
+      }, { force: true });
+      // 同一候选在下一次完整列表中仍缺失时，不重复写入告警；等它重新出现后
+      // 由状态变化/重新观察建立新的可解释时间线。
+      state.eligibleAt = 0;
+      state.lastSnapshotSequence = snapshotSequence;
+    }
+  }
+
+  async function processRemoteRecords(records, options = {}) {
     if (config.entryMode === 'click') return false;
-    developerLog('列表候选处理', { source: 'remote-list', count: Array.isArray(records) ? records.length : 0 });
+    const snapshotSequence = ++candidateSnapshotSequence;
+    developerLog('列表候选处理', { source: 'remote-list', count: Array.isArray(records) ? records.length : 0, snapshotSequence });
     const orderedRecords = [...(records || [])].map(record => ({ record, data: recordData(record) })).filter(x => x.data).sort((a, b) => candidatePriority(b.data) - candidatePriority(a.data));
     for (const { record, data: prebuilt } of orderedRecords) {
       const d = prebuilt;
@@ -1270,21 +1443,24 @@
         continue;
       }
       const reasons = matchFailureReasons(d);
+      const lifecycle = observeCandidateLifecycle(d, 'remote-list', { failedRules: reasons, eligible: !reasons.length, snapshotSequence, stage: 'listed' });
       if (dataSeen(d)) {
-        developerLog('候选跳过', { ...debugCandidate(d, { source: 'remote-list' }), reason: '已处理' });
+        developerLog('候选跳过', { ...debugCandidate(d, { source: 'remote-list', lifecycle: lifecycleDebug(lifecycle) }), reason: '已处理' });
         continue;
       }
       if (reasons.length) {
-        developerLog('候选过滤', { ...debugCandidate(d, { source: 'remote-list' }), reason: '规则不匹配', failedRules: reasons });
+        developerLog('候选过滤', { ...debugCandidate(d, { source: 'remote-list', lifecycle: lifecycleDebug(lifecycle) }), reason: '规则不匹配', failedRules: reasons });
         continue;
       }
-      developerLog('候选命中', { ...debugCandidate(d, { source: 'remote-list' }), reason: '规则通过' });
+      developerLog('候选命中', { ...debugCandidate(d, { source: 'remote-list', lifecycle: lifecycleDebug(lifecycle) }), reason: '规则通过' });
       if (entryDiagnosisLockActive()) {
-        developerLog('候选观察', { ...debugCandidate(d, { source: 'remote-list' }), reason: '已有客户处于诊断中，仅继续刷新列表' });
+        developerLog('候选等待进入', { ...debugCandidate(d, { source: 'remote-list', lifecycle: lifecycleDebug(lifecycle) }), reason: '已有客户处于诊断中，仅继续刷新列表', waitMs: lifecycle?.eligibleAt ? Date.now() - lifecycle.eligibleAt : null });
         continue;
       }
+      if (lifecycle) lifecycle.lastStage = 'entry-attempt';
       if (!await enterDiagnosis(d)) {
-        developerLog('候选进入失败', { ...debugCandidate(d, { source: 'remote-list' }), reason: '协议和页面入口均未成功' });
+        if (lifecycle) lifecycle.attemptCount = Number(lifecycle.attemptCount || 0) + 1;
+        developerLog('候选进入失败', { ...debugCandidate(d, { source: 'remote-list', lifecycle: lifecycleDebug(lifecycle) }), reason: '协议和页面入口均未成功', waitMs: lifecycle?.eligibleAt ? Date.now() - lifecycle.eligibleAt : null });
         continue;
       }
       rememberData(d);
@@ -1292,6 +1468,7 @@
       await new Promise(resolve => setTimeout(resolve, Number(config.clickDelayMs) || 0));
       return true;
     }
+    reconcileCandidateSnapshot(records, 'remote-list', snapshotSequence, { complete: options.complete === true });
     return false;
   }
   async function refreshRemoteCandidates(options = {}) {
@@ -1306,7 +1483,7 @@
     if (listRefreshRunning || now - lastListFetchAt < cooldown) {
       // 保留 WebSocket 携带的精确线索，待当前请求结束或冷却结束后再按该线索取列表。
       if (match) queuedRealtimeMatch = match;
-      developerLog('列表请求排队', { source: options.reason || 'list', reason: listRefreshRunning ? '已有请求进行中' : '冷却保护', waitMs: Math.max(0, cooldown - (now - lastListFetchAt)), narrow: !!match });
+      developerLog('列表请求排队', { source: options.reason || 'list', reason: listRefreshRunning ? '已有请求进行中' : '冷却保护', waitMs: Math.max(0, cooldown - (now - lastListFetchAt)), narrow: !!match, candidateTag: debugTag(match), diagnosisActive, entryRunning });
       return false;
     }
     listRefreshRunning = true;
@@ -1316,12 +1493,15 @@
         developerLog('实时列表请求发起', {
           source: options.reason || 'list',
           dispatchDelayMs: Math.max(0, now - Number(options.hintAt) || 0),
-          withinOneSecond: now - Number(options.hintAt) <= 1000
+          withinOneSecond: now - Number(options.hintAt) <= 1000,
+          candidateTag: debugTag(match),
+          diagnosisActive,
+          entryRunning
         });
       }
       // 有精确线索时缩小请求范围；没有线索才取常规的最近列表。
-      const records = await fetchRadiationRecords({ match, pageSize: match ? 20 : 30, timeoutMs: 5000, reason: options.reason || 'list' });
-      return await processRemoteRecords(records);
+      const records = await fetchRadiationRecords({ match, pageSize: match ? 20 : 30, timeoutMs: 5000, reason: options.reason || 'list', hintAt: options.hintAt });
+      return await processRemoteRecords(records, { complete: !match && options.complete !== false });
     } finally {
       listRefreshRunning = false;
     }
@@ -1440,19 +1620,29 @@
         const failedRules = d ? matchFailureReasons(d).filter(reason =>
           !statusUnknown || !['报告状态非待诊断', '报告状态'].includes(reason)
         ) : [];
+        const lifecycle = d ? observeCandidateLifecycle(d, 'websocket', {
+          failedRules,
+          eligible: !failedRules.length && !shouldSkipLocked(d),
+          stage: 'websocket',
+          snapshotSequence: candidateSnapshotSequence
+        }) : null;
         if (statusUnknown) d.__realtimeNeedsServerStatus = true;
-        if (seenAlready) developerLog('候选跳过', { ...debugCandidate(d, { source: 'websocket' }), reason: '已处理' });
-        else if (d && failedRules.length) developerLog('候选过滤', { ...debugCandidate(d, { source: 'websocket' }), reason: '规则不匹配', failedRules });
+        if (seenAlready) developerLog('候选跳过', { ...debugCandidate(d, { source: 'websocket', lifecycle: lifecycleDebug(lifecycle) }), reason: '已处理' });
+        else if (d && failedRules.length) developerLog('候选过滤', { ...debugCandidate(d, { source: 'websocket', lifecycle: lifecycleDebug(lifecycle) }), reason: '规则不匹配', failedRules });
         else if (d && !recordId) developerLog('实时推送降级', { ...debugCandidate(d, { source: 'websocket' }), reason: '线索没有记录编号' });
         if (d && !seenAlready && !failedRules.length && recordId) {
-          developerLog('实时推送直接协议校验', { ...debugCandidate(d, { source: 'websocket' }), serverStatusCheck: statusUnknown });
+          developerLog('实时推送直接协议校验', { ...debugCandidate(d, { source: 'websocket', lifecycle: lifecycleDebug(lifecycle) }), serverStatusCheck: statusUnknown });
           if (entryDiagnosisLockActive()) {
-            developerLog('实时推送观察', { ...debugCandidate(d, { source: 'websocket' }), reason: '已有客户处于诊断中，仅保留列表刷新' });
+            developerLog('候选等待进入', { ...debugCandidate(d, { source: 'websocket', lifecycle: lifecycleDebug(lifecycle) }), reason: '已有客户处于诊断中，仅保留列表刷新', waitMs: lifecycle?.eligibleAt ? Date.now() - lifecycle.eligibleAt : null });
           } else {
+            if (lifecycle) lifecycle.lastStage = 'entry-attempt';
             entered = await enterDiagnosis(d);
           }
           if (entered) rememberData(d);
-          else developerLog('候选进入失败', { ...debugCandidate(d, { source: 'websocket' }), reason: '协议入口失败，等待窄列表兜底' });
+          else {
+            if (lifecycle) lifecycle.attemptCount = Number(lifecycle.attemptCount || 0) + 1;
+            developerLog('候选进入失败', { ...debugCandidate(d, { source: 'websocket', lifecycle: lifecycleDebug(lifecycle) }), reason: '协议入口失败，等待窄列表兜底', waitMs: lifecycle?.eligibleAt ? Date.now() - lifecycle.eligibleAt : null });
+          }
         }
       } catch (e) {
         console.debug('[自动诊断] 实时提示处理失败，转入列表兜底', String(e));
@@ -1567,31 +1757,38 @@
       const rows = queryBodyRows().map(rowData);
       for (const d of rows) {
         const reasons = matchFailureReasons(d);
+        const lifecycle = observeCandidateLifecycle(d, 'dom', {
+          failedRules: reasons,
+          eligible: !reasons.length,
+          stage: 'dom'
+        });
         if (config.developerMode && d.row) {
           const operator = diagnoseOperator(d.row);
           developerLog('页面行状态', {
-            ...debugCandidate(d, { source: 'dom', reason: reasons[0] || '规则通过' }),
+            ...debugCandidate(d, { source: 'dom', lifecycle: lifecycleDebug(lifecycle), reason: reasons[0] || '规则通过' }),
             diagnoseEntryFound: !!operator,
             diagnoseEntryDisabled: !!operator && operatorDisabled(operator),
             operatorCount: d.row.querySelectorAll(config.selectors.operatorItems).length
           });
         }
         if (dataSeen(d)) {
-          developerLog('候选跳过', { ...debugCandidate(d, { source: 'dom' }), reason: '已处理' });
+          developerLog('候选跳过', { ...debugCandidate(d, { source: 'dom', lifecycle: lifecycleDebug(lifecycle) }), reason: '已处理' });
           continue;
         }
         if (reasons.length) {
-          developerLog('候选过滤', { ...debugCandidate(d, { source: 'dom' }), reason: '规则不匹配', failedRules: reasons });
+          developerLog('候选过滤', { ...debugCandidate(d, { source: 'dom', lifecycle: lifecycleDebug(lifecycle) }), reason: '规则不匹配', failedRules: reasons });
           continue;
         }
-        developerLog('候选命中', { ...debugCandidate(d, { source: 'dom' }), reason: '规则通过' });
+        developerLog('候选命中', { ...debugCandidate(d, { source: 'dom', lifecycle: lifecycleDebug(lifecycle) }), reason: '规则通过' });
         if (entryDiagnosisLockActive()) {
-          developerLog('候选观察', { ...debugCandidate(d, { source: 'dom' }), reason: '已有客户处于诊断中，仅继续观察列表' });
+          developerLog('候选等待进入', { ...debugCandidate(d, { source: 'dom', lifecycle: lifecycleDebug(lifecycle) }), reason: '已有客户处于诊断中，仅继续观察列表', waitMs: lifecycle?.eligibleAt ? Date.now() - lifecycle.eligibleAt : null });
           continue;
         }
         // 只有真正找到可点击的诊断入口后才记入 seen；按钮暂时禁用时下一轮继续尝试。
+        if (lifecycle) lifecycle.lastStage = 'entry-attempt';
         if (!await enterDiagnosis(d)) {
-          developerLog('候选进入失败', { ...debugCandidate(d, { source: 'dom' }), reason: '协议和页面入口均未成功' });
+          if (lifecycle) lifecycle.attemptCount = Number(lifecycle.attemptCount || 0) + 1;
+          developerLog('候选进入失败', { ...debugCandidate(d, { source: 'dom', lifecycle: lifecycleDebug(lifecycle) }), reason: '协议和页面入口均未成功', waitMs: lifecycle?.eligibleAt ? Date.now() - lifecycle.eligibleAt : null });
           continue;
         }
         rememberData(d);
@@ -1761,6 +1958,7 @@
     checks.push(`路由：${path}`);
     checks.push(`配置：${config.enabled ? '启用' : '停用'} / 进入方式 ${config.entryMode}`);
     checks.push(`页面行：${queryBodyRows().length}；账号门禁：${accountAllowed() ? '通过' : '未通过'}`);
+    checks.push(`开发者采集：${config.developerMode ? '开启' : '关闭'}；记录 ${debugEvents.length} 条；生命周期 ${candidateLifecycle.size} 个`);
     checks.push(`权重：检查项目 ${parseWeights(config.examWeights).size} 项，机构 ${parseWeights(config.institutionWeights).size} 项`);
     checks.push(`年龄：${config.age?.unlimited ? '不限' : `${config.age?.min ?? ''}-${config.age?.max ?? ''}`}`);
     const updateSource = await checkUpdateSource();
