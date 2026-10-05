@@ -89,7 +89,9 @@
     "触发一次 TOKEN_FAIL，观察单次恢复和直接登录自愈",
     "开发者模式下观察诊断锁释放记录，确认右侧列表持续刷新且无诊断医生姓名时允许下一位进入",
     "安装独立 OCR 运行环境并启动 127.0.0.1:18766，随后用算式验证码完成一次真实协议登录",
-    "确定 GitHub 仓库后推送并配置 @updateURL/@downloadURL"
+    "在 GitHub 创建公开仓库 kongji1/jiangxi-radiation-auto-diagnose（当前 GitHub MCP 没有创建仓库工具）",
+    "仓库创建后用 GitHub MCP 推送 0.8.45，并验证 Raw URL 返回 200；浏览器仍需能通过现有 Clash 路径访问 raw.githubusercontent.com",
+    "通过 Tampermonkey 正常更新流程加载 0.8.45，再用当前 Edge CUA/CDP 运行日志确认版本，禁止绕过 chrome-extension URL 策略"
   ],
   "projectRules": "AGENTS.md"
 }
