@@ -10,7 +10,7 @@
   "tampermonkeyLoadedVersion": "0.8.44 observed via current Edge CUA/CDP runtime-start log on 2026-10-05; local source is 0.8.45",
   "liveVerification": "Source contract, syntax, lifecycle synthetic transition, release-failure, and arithmetic CAPTCHA bridge tests pass for 0.8.45. Current Edge CUA/CDP runtime-start logging proves Tampermonkey is running 0.8.44, so the browser is one version behind the local 0.8.45 source. Auto-open can be disabled independently from read-only monitoring: WebSocket/status/list observation, developer diagnostics, and self-healing route/session checks continue while no protocol or page entry is attempted. Developer events retain full candidate fields locally for a rolling ten-minute window, are periodically purged and persisted, record credential shape diagnostics without persisting raw credentials, snapshot selected filter values at runtime start, emit an explicit runtime version event, and correlate candidate lifecycle timestamps, list request ids, protocol responses, and lock/status transitions. GitHub Raw publication and the 0.8.45 browser update remain unverified.",
   "lastObservedRuntime": {
-    "capturedAt": "2026-10-05T12:07:27.160Z",
+    "capturedAt": "2026-10-05T12:16:16.325Z",
     "source": "Current Edge CUA/CDP page developer log from Tampermonkey userscript runtime",
     "scriptVersionObservedInSourceRecord": "0.8.44",
     "statusProbe": "code=2002 repeated; auth headers absent in script context",
