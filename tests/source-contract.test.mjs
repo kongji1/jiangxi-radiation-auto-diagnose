@@ -12,6 +12,7 @@ const releaseTool = fs.readFileSync(path.join(root, 'tools', 'verify-release.ps1
 const publishTool = fs.readFileSync(path.join(root, 'tools', 'publish-github.ps1'), 'utf8');
 const quickMaintenance = fs.readFileSync(path.join(root, 'tools', 'gpt6-quick-maintenance.ps1'), 'utf8');
 const quickGuide = fs.readFileSync(path.join(root, 'docs', 'GPT6_QUICK_MAINTENANCE.md'), 'utf8');
+const hotUpdateGuide = fs.readFileSync(path.join(root, 'docs', 'GITHUB_HOT_UPDATE.md'), 'utf8');
 
 execFileSync(process.execPath, ['--check', sourcePath], { stdio: 'inherit' });
 
@@ -230,5 +231,6 @@ if (!/git ls-remote/.test(publishTool) || !/git push origin/.test(publishTool) |
 if (!/node --check/.test(quickMaintenance) || !/lifecycle-diagnostics\.test\.mjs/.test(quickMaintenance) || !/release-failure\.test\.mjs/.test(quickMaintenance) || !/READY/.test(quickMaintenance)) throw new Error('GPT-6 quick maintenance tool incomplete');
 if (!/RequireClean/.test(quickMaintenance) || !/workingTree/.test(quickMaintenance)) throw new Error('GPT-6 quick maintenance dirty mode incomplete');
 if (!quickGuide.includes('五分钟') || !quickGuide.includes('配置门禁快照') || !quickGuide.includes('认证上下文')) throw new Error('GPT-6 quick maintenance guide incomplete');
+if (!hotUpdateGuide.includes('0.8.45') || hotUpdateGuide.includes('0.8.44')) throw new Error('GitHub hot-update guide has stale version evidence');
 
 console.log(`source-contract: passed ${required.length} checks; version=${state.version}`);

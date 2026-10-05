@@ -27,13 +27,15 @@ powershell -ExecutionPolicy Bypass -File tools/verify-release.ps1
 
 如果暂时没有启动 OCR 服务，可使用 `-SkipOcrHealth`，但不能把该结果当作登录链路验证。
 
+OCR 默认端口为 `18766`。启动脚本会先检查端口归属；若检测到其它本地服务占用，使用 `-Port 18767` 等空闲端口启动，并在设置界面同步修改 OCR 地址。
+
 仓库创建并完成 Git 认证后，使用下面的发布脚本：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools/publish-github.ps1 -Repository kongji1/jiangxi-radiation-auto-diagnose
 ```
 
-脚本会先执行完整发布检查，再验证远端仓库、推送当前提交，并读取 Raw 文件确认版本为当前源码版本 `0.8.44`。仓库不存在或 Raw 仍返回 404 时会直接失败。
+脚本会先执行完整发布检查，再验证远端仓库、推送当前提交，并读取 Raw 文件确认版本为当前源码版本 `0.8.45`。仓库不存在或 Raw 仍返回 404 时会直接失败。
 
 在项目根目录运行：
 
