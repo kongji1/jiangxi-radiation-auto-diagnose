@@ -1,5 +1,15 @@
 # 验证记录
 
+## 0.8.45 本地回归验证（2026-10-05）
+
+- `node --check jiangxi-radiation-auto-diagnose.user.js`：通过。
+- 源代码契约：88 项通过；覆盖“只读监控”和“启用自动打开”的独立门禁、远程列表/实时推送/DOM 扫描入口，以及设置面板和运行时快照。
+- `node tests/lifecycle-diagnostics.test.mjs`：通过，验证候选首次观察、被占用、列表消失和同一 `lifecycleKey` 关联。
+- 发布失败保护：3 个原生进程失败场景通过；CAPTCHA 测试：4 项通过。
+- OCR 启动器端口保护：占用的 18766 端口会识别为其它服务并给出可操作错误；切换到空闲端口 18767 时健康接口返回 `service=captcha-ocr`，验证进程已停止且没有遗留监听。
+- `tools/gpt6-quick-maintenance.ps1 -SkipOcrHealth -RequireClean`：返回 `READY`，当前源码版本 `0.8.45`，工作树干净。
+- 仍未由本地验证替代的运行态证据：Tampermonkey 是否已加载 `0.8.45`、GitHub Raw 是否公开可读、已登录会话下的真实协议进入和浏览器 Network 低负载间隔。
+
 ## 0.8.44 本地回归验证（2026-10-05）
 
 - 修复实时记录姓名提取：`张传和男52岁` 会以 `张传和` 作为协议查询姓名。
