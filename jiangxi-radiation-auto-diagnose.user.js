@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         江西省县域医共体 - 自动诊断候选
 // @namespace    local.jiangxi.radiation
-// @version      0.8.44
+// @version      0.8.45
 // @updateURL   https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @downloadURL https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @description  以页面实时推送为主、轻量协议探测为兜底，按可配置规则识别后优先通过系统协议进入诊断；支持可控开发者诊断日志。
@@ -20,12 +20,14 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.8.44';
+  const SCRIPT_VERSION = '0.8.45';
 
   // 所有业务规则和页面定位都集中在这里，也可以从表头设置弹窗进入配置面板修改。
   const DEFAULT_CONFIG = {
     configSchema: 2,
     enabled: true,
+    // 只读监控与自动打开分离。关闭自动打开时仍可观察 WebSocket、协议列表、状态和开发者日志。
+    monitoringEnabled: true,
     // 默认开启完整诊断记录；仅保留最近 10 分钟，关闭后按用户选择持久化。
     developerMode: true,
     developerModeDebugWindowVersion: '0.8.36',
@@ -200,6 +202,7 @@
         developerModeMigrationApplied = true;
       }
       if (parsed.realtimeHints == null) parsed.realtimeHints = true;
+      if (parsed.monitoringEnabled == null) parsed.monitoringEnabled = true;
       if (!parsed.listHeartbeatMs) parsed.listHeartbeatMs = 15000;
       if (parsed.pageQueryRefresh == null) parsed.pageQueryRefresh = true;
       if (!parsed.examSiteCount) parsed.examSiteCount = parsed.singleSiteOnly ? { min: 1, max: 1 } : { min: null, max: null };
@@ -977,8 +980,20 @@
   function isListRoute(path = pageWindow().location.pathname) {
     return path === '/radiation';
   }
+  // 观察链路和“自动打开”是两个独立门禁：用户关闭自动打开后，WebSocket、
+  // statusNum、只读列表和生命周期日志仍然运行，但任何协议校验或页面点击都被硬挡住。
+  function isMonitoringEnabled() {
+    return config.monitoringEnabled !== false;
+  }
+  function isAutoOpenEnabled() {
+    return config.enabled === true;
+  }
 
   function clickDiagnose(d) {
+    if (!isAutoOpenEnabled()) {
+      developerLog('观察模式跳过自动打开', { ...debugCandidate(d), source: 'page-click', reason: '自动打开已关闭' });
+      return false;
+    }
     if (entryDiagnosisLockActive()) return false;
     if (!d?.row) return false;
     const current = rowData(d.row);
@@ -1194,6 +1209,10 @@
   }
 
   async function protocolEnter(d) {
+    if (!isAutoOpenEnabled()) {
+      developerLog('观察模式跳过自动打开', { ...debugCandidate(d), source: 'protocol', reason: '自动打开已关闭' });
+      return false;
+    }
     const record = d?.record || findRowRecord(d) || await findRowRecordByApi(d);
     const repUid = record?.repUid || record?.reportUid || record?.reportId || record?.id;
     const recordView = record ? recordData(record) : null;
@@ -1276,6 +1295,10 @@
   }
 
   async function enterDiagnosis(d) {
+    if (!isAutoOpenEnabled()) {
+      developerLog('观察模式跳过自动打开', { ...debugCandidate(d), source: 'entry-gate', reason: '自动打开已关闭' });
+      return false;
+    }
     if (entryRunning || entryDiagnosisLockActive() || !isMonitorRoute()) return false;
     if (d?.__entryBlocked) {
       developerLog('进入前硬门禁拒绝', { ...debugCandidate(d), reason: d.__entryBlocked });
@@ -1499,6 +1522,10 @@
         continue;
       }
       developerLog('候选命中', { ...debugCandidate(d, { source: 'remote-list', lifecycle: lifecycleDebug(lifecycle) }), reason: '规则通过' });
+      if (!isAutoOpenEnabled()) {
+        developerLog('观察模式跳过自动打开', { ...debugCandidate(d, { source: 'remote-list', lifecycle: lifecycleDebug(lifecycle) }), reason: '自动打开已关闭' });
+        continue;
+      }
       if (entryDiagnosisLockActive()) {
         developerLog('候选等待进入', { ...debugCandidate(d, { source: 'remote-list', lifecycle: lifecycleDebug(lifecycle) }), reason: '已有客户处于诊断中，仅继续刷新列表', waitMs: lifecycle?.eligibleAt ? Date.now() - lifecycle.eligibleAt : null });
         continue;
@@ -1555,7 +1582,7 @@
   async function probeStatus() {
     // 协议探测不依赖表格 DOM，隐藏标签页也继续工作；浏览器冻结页面时则由 WebSocket
     // 消息在恢复后补上。DOM 扫描仍由 scan() 自己限制为前台执行。
-    if (!config.enabled || config.entryMode === 'click' || probeRunning || !isMonitorRoute()) return;
+    if (!isMonitoringEnabled() || config.entryMode === 'click' || probeRunning || !isMonitorRoute()) return;
     if (!accountAllowed()) return;
     probeRunning = true;
     const startedAt = Date.now();
@@ -1599,7 +1626,7 @@
   }
   function scheduleProbe(delay = 0) {
     if (probeTimer) clearTimeout(probeTimer);
-    if (!config.enabled) return;
+    if (!isMonitoringEnabled()) return;
     probeTimer = setTimeout(async () => {
       await probeStatus();
       scheduleProbe(nextProbeDelay());
@@ -1607,7 +1634,7 @@
   }
 
   function queueRealtimeRefresh(options = {}) {
-    if (!config.enabled || config.entryMode === 'click' || !config.realtimeHints || !isMonitorRoute()) return;
+    if (!isMonitoringEnabled() || config.entryMode === 'click' || !config.realtimeHints || !isMonitorRoute()) return;
     if (!accountAllowed()) return;
     if (options.match && typeof options.match === 'object') queuedRealtimeMatch = options.match;
     if (options.hintAt) queuedRealtimeHintAt = Number(options.hintAt) || queuedRealtimeHintAt;
@@ -1635,7 +1662,7 @@
   }
 
   async function processRealtimeHint(hint) {
-    if (!config.enabled || config.entryMode === 'click' || !config.realtimeHints || !isMonitorRoute()) return;
+    if (!isMonitoringEnabled() || config.entryMode === 'click' || !config.realtimeHints || !isMonitorRoute()) return;
     if (!accountAllowed()) return;
     if (!hint || typeof hint !== 'object') {
       queueRealtimeRefresh({ hintAt: Date.now() });
@@ -1676,16 +1703,20 @@
         if (seenAlready) developerLog('候选跳过', { ...debugCandidate(d, { source: 'websocket', lifecycle: lifecycleDebug(lifecycle) }), reason: '已处理' });
         else if (d && failedRules.length) developerLog('候选过滤', { ...debugCandidate(d, { source: 'websocket', lifecycle: lifecycleDebug(lifecycle) }), reason: '规则不匹配', failedRules });
         else if (d && !recordId) developerLog('实时推送降级', { ...debugCandidate(d, { source: 'websocket' }), reason: '线索没有记录编号' });
+        let entrySkippedByObservation = false;
         if (d && !seenAlready && !failedRules.length && recordId) {
-          developerLog('实时推送直接协议校验', { ...debugCandidate(d, { source: 'websocket', lifecycle: lifecycleDebug(lifecycle) }), serverStatusCheck: statusUnknown });
-          if (entryDiagnosisLockActive()) {
+          developerLog(isAutoOpenEnabled() ? '实时推送直接协议校验' : '实时推送候选观察', { ...debugCandidate(d, { source: 'websocket', lifecycle: lifecycleDebug(lifecycle) }), serverStatusCheck: statusUnknown, autoOpenEnabled: isAutoOpenEnabled() });
+          if (!isAutoOpenEnabled()) {
+            entrySkippedByObservation = true;
+            developerLog('观察模式跳过自动打开', { ...debugCandidate(d, { source: 'websocket', lifecycle: lifecycleDebug(lifecycle) }), reason: '自动打开已关闭' });
+          } else if (entryDiagnosisLockActive()) {
             developerLog('候选等待进入', { ...debugCandidate(d, { source: 'websocket', lifecycle: lifecycleDebug(lifecycle) }), reason: '已有客户处于诊断中，仅保留列表刷新', waitMs: lifecycle?.eligibleAt ? Date.now() - lifecycle.eligibleAt : null });
           } else {
             if (lifecycle) lifecycle.lastStage = 'entry-attempt';
             entered = await enterDiagnosis(d);
           }
           if (entered) rememberData(d);
-          else {
+          else if (!entrySkippedByObservation) {
             if (lifecycle) lifecycle.attemptCount = Number(lifecycle.attemptCount || 0) + 1;
             developerLog('候选进入失败', { ...debugCandidate(d, { source: 'websocket', lifecycle: lifecycleDebug(lifecycle) }), reason: '协议入口失败，等待窄列表兜底', waitMs: lifecycle?.eligibleAt ? Date.now() - lifecycle.eligibleAt : null });
           }
@@ -1796,7 +1827,7 @@
   }
 
   async function scan() {
-    if (!config.enabled || running || document.visibilityState === 'hidden') return;
+    if (!isMonitoringEnabled() || running || document.visibilityState === 'hidden') return;
     if (!accountAllowed()) return;
     running = true;
     try {
@@ -1826,6 +1857,10 @@
           continue;
         }
         developerLog('候选命中', { ...debugCandidate(d, { source: 'dom', lifecycle: lifecycleDebug(lifecycle) }), reason: '规则通过' });
+        if (!isAutoOpenEnabled()) {
+          developerLog('观察模式跳过自动打开', { ...debugCandidate(d, { source: 'dom', lifecycle: lifecycleDebug(lifecycle) }), reason: '自动打开已关闭' });
+          continue;
+        }
         if (entryDiagnosisLockActive()) {
           developerLog('候选等待进入', { ...debugCandidate(d, { source: 'dom', lifecycle: lifecycleDebug(lifecycle) }), reason: '已有客户处于诊断中，仅继续观察列表', waitMs: lifecycle?.eligibleAt ? Date.now() - lifecycle.eligibleAt : null });
           continue;
@@ -1859,7 +1894,7 @@
       developerLog('页面查询跳过', { source: 'protocol-only', reason: '协议模式不触碰页面查询控件' });
       return false;
     }
-    if (!config.enabled || pageQueryRunning || (!automatic && document.visibilityState !== 'visible') || pageWindow().location.pathname !== '/radiation') return false;
+    if (!isMonitoringEnabled() || pageQueryRunning || (!automatic && document.visibilityState !== 'visible') || pageWindow().location.pathname !== '/radiation') return false;
     if (!accountAllowed() || Date.now() - lastPageQueryAt < 5000) return false;
     if (automatic && Date.now() - lastPageQueryAt < 15000) return false;
     const button = queryButton();
@@ -1879,7 +1914,7 @@
   }
 
   function scheduleAutoQueryFallback() {
-    if (!config.enabled || config.entryMode === 'click' || !config.realtimeHints || !isMonitorRoute()) return;
+    if (!isMonitoringEnabled() || config.entryMode === 'click' || !config.realtimeHints || !isMonitorRoute()) return;
     if (!config.pageQueryRefresh) return;
     if (document.visibilityState === 'visible' && lastRealtimeHintAt && Date.now() - lastRealtimeHintAt < 60000) return;
     if (autoQueryFallbackTimer || Date.now() - lastPageQueryAt < 15000) return;
@@ -1893,11 +1928,11 @@
 
   function schedulePageQueryHeartbeat(delay) {
     if (pageQueryHeartbeatTimer) clearTimeout(pageQueryHeartbeatTimer);
-    if (!config.enabled || config.entryMode === 'click' || !config.pageQueryRefresh || !isListRoute()) return;
+    if (!isMonitoringEnabled() || config.entryMode === 'click' || !config.pageQueryRefresh || !isListRoute()) return;
     const interval = Math.max(15000, Number(config.listHeartbeatMs) || 15000);
     pageQueryHeartbeatTimer = setTimeout(async () => {
       pageQueryHeartbeatTimer = null;
-      if (config.enabled && config.entryMode !== 'click' && isListRoute()) {
+      if (isMonitoringEnabled() && config.entryMode !== 'click' && isListRoute()) {
         const stale = Date.now() - lastPageQueryAt >= interval;
         // 实时提示刚到达时让 WebSocket 处理链路先完成；超过一个刷新周期仍无提示，
         // 自动查询一次页面，避免列表长期停留在旧结果。
@@ -1938,6 +1973,9 @@
     queuedRealtimeHintAt = 0;
     developerLog('配置门禁快照', {
       source: 'runtime-start',
+      autoOpenEnabled: isAutoOpenEnabled(),
+      monitoringEnabled: isMonitoringEnabled(),
+      observationOnly: isMonitoringEnabled() && !isAutoOpenEnabled(),
       encounterUnlimited: !(config.encounterTypes || []).length,
       ageUnlimited: !!config.age?.unlimited || (config.age?.min == null && config.age?.max == null),
       modalityUnlimited: !(config.modalities || []).length,
@@ -2003,7 +2041,9 @@
     const checks = [];
     const path = pageWindow().location.pathname;
     checks.push(`路由：${path}`);
-    checks.push(`配置：${config.enabled ? '启用' : '停用'} / 进入方式 ${config.entryMode}`);
+    const entryModeText = config.entryMode === 'click' ? '仅页面点击' : config.entryMode === 'protocol-only' ? '仅协议' : '协议优先';
+    checks.push(`配置：自动打开${config.enabled ? '启用' : '停用'} / 只读监控${isMonitoringEnabled() ? '启用' : '停用'} / 进入方式 ${entryModeText}`);
+    if (config.entryMode === 'click') checks.push('页面点击模式：协议列表仍可观察，但仅自动打开启用时才允许点击诊断');
     checks.push(`页面行：${queryBodyRows().length}；账号门禁：${accountAllowed() ? '通过' : '未通过'}`);
     checks.push(`开发者采集：${config.developerMode ? '开启' : '关闭'}；记录 ${debugEvents.length} 条；生命周期 ${candidateLifecycle.size} 个`);
     checks.push(`权重：检查项目 ${parseWeights(config.examWeights).size} 项，机构 ${parseWeights(config.institutionWeights).size} 项`);
@@ -2055,7 +2095,7 @@
       <div class="jx-panel-header" style="padding:12px 14px;background:linear-gradient(135deg,#409eff,#67c23a);color:white;display:flex;justify-content:space-between;align-items:center"><b style="font-size:15px">自动诊断设置</b><button type="button" data-a="close" aria-label="关闭设置" title="关闭设置" style="border:0;background:#ffffff33;color:white;border-radius:6px;padding:2px 10px;font-size:18px;line-height:1.25;cursor:pointer">×</button></div>
       <div class="jx-panel-content" style="padding:10px 14px;overflow:auto;min-height:0;flex:1 1 auto">
         <div style="display:flex;gap:6px;align-items:center;margin-bottom:9px"><select data-f="profile" style="flex:1;padding:5px"></select><button data-a="loadProfile">切换</button><input data-f="profileName" placeholder="方案名" style="width:90px;padding:5px"><button data-a="saveProfile">保存方案</button><button data-a="deleteProfile">删除</button></div>
-        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><label><input type="checkbox" data-f="enabled"> 启用自动打开</label><label>本地扫描 <input data-f="pollMs" type="number" min="1000" step="500" style="width:70px"> ms</label><label>状态探测 <input data-f="statusProbeMs" type="number" min="3000" step="1000" style="width:70px"> ms</label><label>列表补偿 <input data-f="listHeartbeatMs" type="number" min="10000" step="1000" style="width:80px"> ms</label><label>操作延迟 <input data-f="clickDelayMs" type="number" min="0" style="width:60px"> ms</label><label>进入方式 <select data-f="entryMode" style="width:auto"><option value="protocol-first">协议优先（失败回退点击）</option><option value="protocol-only">仅协议</option><option value="click">页面点击</option></select></label><label><input type="checkbox" data-f="pageQueryRefresh"> 允许脚本点击查询</label></div>
+        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><label><input type="checkbox" data-f="enabled"> 启用自动打开</label><label><input type="checkbox" data-f="monitoringEnabled"> 开启只读监控</label><span style="color:#909399;font-size:12px">自动打开关闭时仍接收推送、读取列表并记录诊断信息，不会进入客户</span><label>本地扫描 <input data-f="pollMs" type="number" min="1000" step="500" style="width:70px"> ms</label><label>状态探测 <input data-f="statusProbeMs" type="number" min="3000" step="1000" style="width:70px"> ms</label><label>列表补偿 <input data-f="listHeartbeatMs" type="number" min="10000" step="1000" style="width:80px"> ms</label><label>操作延迟 <input data-f="clickDelayMs" type="number" min="0" style="width:60px"> ms</label><label>进入方式 <select data-f="entryMode" style="width:auto"><option value="protocol-first">协议优先（失败回退点击）</option><option value="protocol-only">仅协议</option><option value="click">页面点击</option></select></label><label><input type="checkbox" data-f="pageQueryRefresh"> 允许脚本点击查询</label></div>
         <small style="display:block;color:#909399;margin:-3px 0 7px">候选发现优先使用 WebSocket、状态计数和只读列表协议；默认每个列表补偿周期同步一次当前筛选条件下的可见表格，不会修改报告状态复选框。</small>
         <fieldset><legend>开发者模式</legend><div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap"><label class="jx-dev-toggle"><input type="checkbox" data-f="developerMode"> 开启开发者模式</label><button type="button" data-a="selfCheck">运行自检</button><button type="button" data-a="copyDebug">复制最近诊断记录</button><button type="button" data-a="clearDebug">清空记录</button><span data-a="debugState" style="color:#909399">当前开启（最近10分钟）</span></div><small style="color:#909399">默认开启并自动保留最近10分钟完整调试记录，便于定位候选未及时进入；超过10分钟自动删除。自检只读当前页面、登录会话和状态协议，不修改报告状态。记录不保存 Cookie、Authorization 或密码。</small></fieldset>
         <fieldset><legend>登录账号</legend><div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap"><span>当前账号：<b data-a="currentAccount">读取中</b></span><button type="button" data-a="useCurrentAccount">仅允许当前账号</button><button type="button" data-a="clearAccountLimit">清空限制</button></div><label>允许自动诊断的账号（留空不限）<input data-f="allowedAccounts" placeholder="可填账号编号或登录名，多个用逗号分隔"></label><small style="color:#909399">支持账号编号和登录名；留空时所有登录账号都启用。</small><div style="margin-top:8px;padding-top:7px;border-top:1px dashed #dcdfe6"><label><input type="checkbox" data-f="directLoginEnabled"> 未登录时启用协议登录</label><label>协议登录账号<input data-f="directLoginUsername" autocomplete="username" placeholder="账号编号"></label><label><input type="checkbox" data-f="directLoginOcrEnabled"> 使用本机 OCR 自动填写验证码</label><label>OCR 地址<input data-f="directLoginOcrEndpoint" value="http://127.0.0.1:18766/ocr" placeholder="http://127.0.0.1:18766/ocr"></label><div style="display:flex;gap:6px;margin-top:5px"><button type="button" data-a="directLoginNow">立即协议登录</button></div><small style="color:#909399">密码只在点击登录时临时输入，不写入配置。验证码优先使用本机 ddddocr，识别失败再显示手工输入。</small></div></fieldset>
@@ -2106,7 +2146,7 @@
     function getGroup(name) { const all = [...box.querySelectorAll(`[data-group-name="${name}"]:checked`)].map(x => x.value); return all.includes('不限') ? [] : all; }
     function render() {
       drawGroups();
-      f('enabled').checked = !!config.enabled; f('developerMode').checked = !!config.developerMode; f('pageQueryRefresh').checked = !!config.pageQueryRefresh; f('skipLockedRecords').checked = config.skipLockedRecords !== false; f('pollMs').value = config.pollMs; f('statusProbeMs').value = config.statusProbeMs || 5000; f('listHeartbeatMs').value = config.listHeartbeatMs || 15000; f('clickDelayMs').value = config.clickDelayMs;
+      f('enabled').checked = !!config.enabled; f('monitoringEnabled').checked = isMonitoringEnabled(); f('developerMode').checked = !!config.developerMode; f('pageQueryRefresh').checked = !!config.pageQueryRefresh; f('skipLockedRecords').checked = config.skipLockedRecords !== false; f('pollMs').value = config.pollMs; f('statusProbeMs').value = config.statusProbeMs || 5000; f('listHeartbeatMs').value = config.listHeartbeatMs || 15000; f('clickDelayMs').value = config.clickDelayMs;
       const debugState = box.querySelector('[data-a="debugState"]'); if (debugState) debugState.textContent = developerModeStateText();
       const currentAccount = box.querySelector('[data-a="currentAccount"]'); if (currentAccount) currentAccount.textContent = accountDisplay();
       f('allowedAccounts').value = listValue(config.allowedAccounts);
@@ -2123,7 +2163,7 @@
       const ps = profiles(); f('profile').innerHTML = '<option value="">选择已保存方案</option>' + Object.keys(ps).sort().map(x => `<option>${esc(x)}</option>`).join('');
     }
     function read() {
-      config.enabled = f('enabled').checked; config.developerMode = f('developerMode').checked; config.pageQueryRefresh = f('pageQueryRefresh').checked; config.skipLockedRecords = f('skipLockedRecords').checked; config.pollMs = Math.max(1000, Number(f('pollMs').value) || 2000); config.statusProbeMs = Math.max(3000, Number(f('statusProbeMs').value) || 5000); config.listHeartbeatMs = Math.max(10000, Number(f('listHeartbeatMs').value) || 15000); config.clickDelayMs = Number(f('clickDelayMs').value) || 0; config.entryMode = f('entryMode').value || 'protocol-first';
+      config.enabled = f('enabled').checked; config.monitoringEnabled = f('monitoringEnabled').checked; config.developerMode = f('developerMode').checked; config.pageQueryRefresh = f('pageQueryRefresh').checked; config.skipLockedRecords = f('skipLockedRecords').checked; config.pollMs = Math.max(1000, Number(f('pollMs').value) || 2000); config.statusProbeMs = Math.max(3000, Number(f('statusProbeMs').value) || 5000); config.listHeartbeatMs = Math.max(10000, Number(f('listHeartbeatMs').value) || 15000); config.clickDelayMs = Number(f('clickDelayMs').value) || 0; config.entryMode = f('entryMode').value || 'protocol-first';
       config.allowedAccounts = parseList(f('allowedAccounts').value);
       config.directLogin = { enabled: f('directLoginEnabled').checked, username: f('directLoginUsername').value.trim(), ocrEnabled: f('directLoginOcrEnabled').checked, ocrEndpoint: f('directLoginOcrEndpoint').value.trim() || 'http://127.0.0.1:18766/ocr' };
       for (const n of ['reportStatuses','imageStatuses','encounterTypes','gender','modalities','examNames','examNamesExtra','checkHospitals','bodyParts','diagnosisDoctors']) config[n] = getGroup(n);
