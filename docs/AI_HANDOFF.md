@@ -76,16 +76,17 @@
                                   └─ 规则匹配 → 协议进入
 ```
 
-约束：探测请求不并发；普通列表至少间隔 15 秒，实时推送触发时先经过 250ms 合并窗口，实际列表请求最短间隔 500ms；实时线索在请求重叠或冷却时排队保留；单次请求有超时；失败会逐步退避到最多约 60 秒。浏览器若冻结或丢弃后台页面，页面脚本会随浏览器生命周期暂停，这是浏览器限制。
+约束：探测请求不并发；普通列表请求最短间隔 10 秒（默认 15 秒），实时推送触发时先经过 250ms 合并窗口，实时列表请求最短间隔 500ms；实时线索在请求重叠或冷却时排队保留；单次请求有超时；失败会逐步退避到最多约 60 秒。浏览器若冻结或丢弃后台页面，页面脚本会随浏览器生命周期暂停，这是浏览器限制。
 
 ## 当前未完成 / 必须实测
 
-1. **Tampermonkey 是否已经加载 0.8.7**：源码已通过语法检查；浏览器实际加载版本仍必须在另一台调试电脑的 Tampermonkey 菜单或控制台中确认，不能用本机源码存在代替运行态证据。
+1. **Tampermonkey 是否已经加载 0.8.45**：2026-10-05 通过当前 Edge 的 CUA/CDP 页面日志确认实际运行版本仍为 `0.8.44`；源码和本地维护结果为 `0.8.45`，因此热更新尚未在浏览器中生效，必须完成脚本更新后再次读取运行版本。
 2. **登录会话下的真实 statusNum/list 响应**：匿名请求只能证明接口存在，返回业务权限错误；必须在已登录页面中确认响应结构和字段名。
 3. **协议进入实测**：用一个仍处于待诊断且允许进入的测试记录，观察是否成功跳到 `/radiation/report?...`，并确认列表端没有重复点击；再用一个已被其他用户锁定或已进入诊断中的记录，确认不发起 `assertAllowEnter`，不点击诊断操作。
 4. **状态门禁实测**：分别覆盖状态码 `102501`（待诊断）和 `102502`（诊断中）等非待诊断状态；非 `102501` 必须在过滤/状态门禁阶段跳过，即使文字或其它过滤条件匹配也不得进入。页面出现“当前报告已被其他用户锁定”或诊断操作禁用时，同样必须跳过。
-5. **低负载观察**：浏览器开发者工具 Network 中观察 1–2 分钟，确认没有重叠请求；前台无近期推送时 `statusNum` 约每 5 秒一次，有近期推送或隐藏页面时至少 15 秒；有 WebSocket 推送时列表请求应紧随提示且受 3 秒冷却保护，没有推送时约 15 秒最多一次列表补偿。
+5. **低负载观察**：浏览器开发者工具 Network 中观察 1–2 分钟，确认没有重叠请求；前台无近期推送时 `statusNum` 默认约每 5 秒一次，有近期推送或隐藏页面时至少 15 秒；普通 `rep/list` 最短间隔 10 秒（默认 15 秒），实时推送经过 250ms 合并窗口后最短间隔 500ms，没有推送时约 15 秒最多一次列表补偿。
 6. **开发者模式排查**：遇到具体候选未及时进入时，在设置中打开“开发者模式”，等待一次推送或列表补偿后点击“复制最近诊断记录”；重点看 `实时推送收到`、`候选过滤`（应能看到非待诊断/已锁定原因）、`协议进入拒绝`、`协议进入成功` 和 `候选进入失败` 事件。
+7. **只读监控反向验证**：关闭“启用自动打开”、保持“开启只读监控”，确认 WebSocket、`statusNum`、只读 `rep/list`、页面观察、自愈和十分钟日志仍运行；同时确认没有 `assertAllowEnter`、协议进入、页面诊断点击，并出现“观察模式跳过自动打开”。
 
 ## 下一次接管步骤
 
@@ -148,9 +149,9 @@
 
 - Do not infer the active filters from `DEFAULT_CONFIG`. Runtime developer logs now emit a sanitized `配置门禁快照` at every `/radiation` start. It records only whether encounter type, age, modality, exam and institution filters are unlimited, plus application-time mode and report-status count.
 - Config migration converts a persisted visual `不限` array sentinel to the internal empty-array representation and normalizes an age configuration with empty bounds to `unlimited=true`. This prevents an old saved profile from silently filtering an otherwise unlimited candidate.
-- A live query for 陈招发 showed `2026-10-01 16:44:47`, CT, 肺部平扫, and eventual `已审核` at `16:54:05` by another doctor. The active configuration must be checked from the runtime snapshot before attributing the miss to age, encounter type or exam.
+- A live query for a historical realtime record showed an application time and eventual `已审核` state by another doctor. The active configuration must be checked from the runtime snapshot before attributing the miss to age, encounter type or exam.
 - The same live session produced `TOKEN_FAIL (2002)` for the read-only list path with `count=0`. After the bounded protocol recovery path fails, 0.8.35 allows one existing page-query fallback when the page is usable; it is protected by the existing 15-second query gate and does not create a polling loop.
-- Source contract, syntax, release-failure and CAPTCHA tests pass for 0.8.35. Tampermonkey runtime loading and the exact historical WebSocket event for 陈招发 remain separate live evidence requirements.
+- Source contract, syntax, release-failure and CAPTCHA tests pass for 0.8.35. Tampermonkey runtime loading and the exact historical WebSocket event remain separate live evidence requirements.
 
 
 
