@@ -16,7 +16,12 @@ const quickGuide = fs.readFileSync(path.join(root, 'docs', 'GPT6_QUICK_MAINTENAN
 execFileSync(process.execPath, ['--check', sourcePath], { stdio: 'inherit' });
 
 const required = [
-  ['metadata version', /@version\s+0\.8\.44/],
+  ['metadata version', /@version\s+0\.8\.45/],
+  ['read-only monitoring default', /monitoringEnabled\s*:\s*true/],
+  ['read-only monitoring UI', /data-f="monitoringEnabled"/],
+  ['read-only monitoring telemetry', /观察模式跳过自动打开/],
+  ['auto-open gate', /function isAutoOpenEnabled[\s\S]+return config\.enabled === true/],
+  ['monitoring self-check', /只读监控|监控状态/],
   ['runtime version telemetry', /developerLog\('运行版本'[\s\S]+SCRIPT_VERSION/],
   ['route re-entry restart', /isMonitorRoute\(path\) && changed[\s\S]+运行时重启[\s\S]+start\(\{ preserveDiagnosisLock: true \}\)/],
   ['route re-entry preserves diagnosis lock', /start\(\{ preserveDiagnosisLock: true \}\)/],
@@ -183,7 +188,23 @@ if (!/def captcha_answer/.test(ocrServer) || !/fullmatch/.test(ocrServer) || !/1
 }
 
 const state = JSON.parse(fs.readFileSync(path.join(root, 'PROJECT_STATE.json'), 'utf8'));
-if (state.version !== '0.8.44') throw new Error(`PROJECT_STATE version mismatch: ${state.version}`);
+
+// Exercise the two independent runtime gates in isolation. A read-only
+// session must keep monitoring when automatic opening is disabled, while
+// enabling monitoring must never implicitly enable entry.
+const gateStart = source.indexOf('  function isMonitoringEnabled');
+const gateEnd = source.indexOf('\n  function clickDiagnose', gateStart);
+if (gateStart < 0 || gateEnd < 0) throw new Error('source contract failed: independent runtime gates missing');
+const gates = new Function('config', `${source.slice(gateStart, gateEnd)}; return { isMonitoringEnabled, isAutoOpenEnabled };`)({ monitoringEnabled: true, enabled: false });
+if (!gates.isMonitoringEnabled() || gates.isAutoOpenEnabled()) {
+  throw new Error('source contract failed: monitoring/auto-open gates are not independent');
+}
+const disabledMonitoring = new Function('config', `${source.slice(gateStart, gateEnd)}; return { isMonitoringEnabled, isAutoOpenEnabled };`)({ monitoringEnabled: false, enabled: true });
+if (disabledMonitoring.isMonitoringEnabled() || !disabledMonitoring.isAutoOpenEnabled()) {
+  throw new Error('source contract failed: monitoring disable unexpectedly changes auto-open gate');
+}
+
+if (state.version !== '0.8.45') throw new Error(`PROJECT_STATE version mismatch: ${state.version}`);
 if (state.performance?.realtimeListMinCooldownMs !== 500) throw new Error('PROJECT_STATE realtime cooldown mismatch');
 if (state.performance?.developerModeDefault !== true) throw new Error('PROJECT_STATE developer mode default mismatch');
 if (state.performance?.developerDebugRetentionMs !== 600000) throw new Error('PROJECT_STATE developer retention mismatch');
@@ -193,7 +214,7 @@ if (state.performance?.credentialValuesPersisted !== false) throw new Error('PRO
 if (state.performance?.cookieNameCaseInsensitive !== true) throw new Error('PROJECT_STATE cookie case-insensitive lookup mismatch');
 if (state.lastObservedRuntime?.statusProbe !== 'code=2002 repeated; auth headers absent in script context') throw new Error('PROJECT_STATE runtime evidence mismatch');
 if (state.lastObservedRuntime?.entryEventsObserved !== 0) throw new Error('PROJECT_STATE runtime entry evidence mismatch');
-if (!readme.includes('源码版本：`0.8.44`')) throw new Error('README version mismatch');
+if (!readme.includes('源码版本：`0.8.45`')) throw new Error('README version mismatch');
 if (!readme.includes('127.0.0.1:18766')) throw new Error('README OCR endpoint missing');
 if (!readme.includes('GPT6_MAINTENANCE.md')) throw new Error('README GPT-6 guide missing');
 if (!gpt6Guide.includes('dispatchDelayMs') || !gpt6Guide.includes('diagnosisActive')) throw new Error('GPT-6 maintenance guide incomplete');

@@ -179,6 +179,13 @@
 - 0.8.34 also rate-limits TOKEN_FAIL recovery to one session-identity refresh per 15 seconds and throttles the corresponding developer event to the same interval. The `/radiation` route protection and single retry remain unchanged; this reduces duplicate recovery traffic when `statusNum` repeatedly returns 2002.
 - Direct-login bootstrap now probes `/api/admin/user/info` before prompting for a password. This handles HttpOnly or delayed `Auth` cookies: an already logged-in page returns through the existing session and never shows the protocol-password dialog on refresh.
 
+## 2026-10-05 continuation: read-only monitoring mode (0.8.45)
+
+- `monitoringEnabled` is independent from `enabled`. The former keeps WebSocket, `statusNum`, read-only `rep/list`, route/session self-healing, candidate lifecycle evidence, and developer diagnostics running; the latter controls automatic opening of a customer.
+- With “启用自动打开” off and “启用只读监控” on, matching candidates are logged with “观察模式跳过自动打开” and no `assertAllowEnter` or page diagnose click is attempted. This is the safe mode for testing against an already audited/open report.
+- Settings and self-check expose both states. Existing persisted `enabled` values remain the automatic-opening preference; new configurations default to read-only monitoring enabled.
+- Static tests now require the 0.8.45 metadata/state/README version, the monitoring default and UI, the no-entry telemetry, and an explicit automatic-opening gate. Browser loading and GitHub Raw publication still require independent runtime evidence.
+
 
 
 

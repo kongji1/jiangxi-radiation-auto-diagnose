@@ -25,6 +25,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\gpt6-quick-maintenan
 
 ## 2–4 分钟：按证据定位
 
+若本次维护是在已打开的审核/报告页面进行，先保持“启用自动打开”关闭并开启“启用只读监控”。此组合仍收集实时提示、状态计数、只读列表、路由/会话自愈和完整十分钟开发者记录，但不调用 `assertAllowEnter`、不点击诊断按钮。看到“观察模式跳过自动打开”后，才能确认候选链路已到达而没有产生进入副作用。
+
 - 候选没有出现：先看 `实时推送收到`、`实时列表请求发起`、`列表请求结果`。
 - 候选出现但没进入：看 `配置门禁快照`、`候选过滤`、`进入前硬门禁拒绝`、`协议进入拒绝`。
 - 候选先符合规则、随后被别人进入：按同一 `lifecycleKey` 串联 `候选首次观察`、`候选等待进入`、`协议进入开始`、`协议进入拒绝`、`候选被其他用户占用` 或 `候选未在后续列表出现`；重点比较 `firstSeenAt`、`eligibleAt`、`dispatchDelayMs`、`durationMs`、前后 `status/statusCode/locked/doctor`。
