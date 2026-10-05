@@ -9,7 +9,7 @@
 | 状态计数 | POST | `/api/ct/rays/rep/statusNum` | 只读，返回各报告状态数量；脚本用它判断是否需要拉列表 |
 | 页面实时提示 | WebSocket | `/api/ct/websocket?Authorization=...` | 页面自身已建立；脚本只观察新报告消息，不创建第二条连接 |
 | 进入校验 | GET | `/api/ct/rays/rep/assertAllowEnter?repUid=...` | 只读校验，确认当前记录可被当前账号进入；只有状态门禁通过后才调用 |
-| 诊断页 | GET 路由 | `/radiation/report?id=...&applyOrgCode=...` | 校验通过后导航，后续锁定由业务页面完成 |
+| 诊断页 | GET 路由 | `/radiation/report?id=...&applyOrgCode=...` | 校验通过后导航；脚本继续只读观察报告页右侧待诊断列表，只有不存在“诊断中+诊断医生”记录时才允许下一位进入 |
 
 完整业务基址是 `http://10.10.94.90:22112`，脚本使用相对路径，避免写死不同会话的来源。
 

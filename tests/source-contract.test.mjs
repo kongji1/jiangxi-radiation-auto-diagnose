@@ -16,8 +16,18 @@ const quickGuide = fs.readFileSync(path.join(root, 'docs', 'GPT6_QUICK_MAINTENAN
 execFileSync(process.execPath, ['--check', sourcePath], { stdio: 'inherit' });
 
 const required = [
-  ['metadata version', /@version\s+0\.8\.40/],
+  ['metadata version', /@version\s+0\.8\.41/],
   ['runtime version telemetry', /developerLog\('运行版本'[\s\S]+SCRIPT_VERSION/],
+  ['route re-entry restart', /isMonitorRoute\(path\) && changed[\s\S]+运行时重启[\s\S]+start\(\{ preserveDiagnosisLock: true \}\)/],
+  ['route re-entry preserves diagnosis lock', /start\(\{ preserveDiagnosisLock: true \}\)/],
+  ['stale async gate cleanup', /listRefreshRunning = false[\s\S]+realtimeRecordRunning = false/],
+  ['monitor report route', /function isMonitorRoute[\s\S]+path === '\/radiation' \|\| path === '\/radiation\/report'/],
+  ['list-only page query', /function isListRoute[\s\S]+path === '\/radiation';/],
+  ['report route bootstrap', /\['\/login', '\/radiation', '\/radiation\/report'\]\.includes/],
+  ['direct report conservative lock', /currentUrl\.pathname === '\/radiation\/report'[\s\S]+diagnosisActive = true/],
+  ['numeric status fallback', /rawStatus\)\s*\?\s*rawStatus/],
+  ['diagnosing numeric lock gate', /diagnosingCode[\s\S]+statusCode[\s\S]+diagnosingCode/],
+  ['report page realtime guard', /processRealtimeHint[\s\S]+isMonitorRoute/],
   ['login route', /\/api\/admin\/userLogin\/login/],
   ['read-only status probe', /\/api\/ct\/rays\/rep\/statusNum/],
   ['unfiltered status probe fallback', /radiationListPayload\(\{ pageSize: 1, ignoreStatusFilter: true, ignoreModalityFilter: true, ignoreInstitutionFilter: true, ignoreBodyPartFilter: true \}\)/],
@@ -66,6 +76,8 @@ const required = [
   ['captcha OCR bridge', /recognizeCaptcha\(capJson\.data\.img\)/],
   ['captcha OCR fallback', /await recognizeCaptcha\(capJson\.data\.img\) \|\| await askCaptcha/],
   ['direct login session probe', /sessionProbe = await fetch\('\/api\/admin\/user\/info'/],
+  ['case-insensitive auth cookie lookup', /function readCookie\(name\)[\s\S]+?toLowerCase\(\)[\s\S]+?item\.slice\(item\.indexOf\('\='\) \+ 1\)/],
+  ['direct login auth cookie guard', /if \(readCookie\('Auth'\)\) return false/],
   ['probe before password prompt', /sessionProbe\.ok && sessionPayload\?\.code === 200 && sessionPayload\.data[\s\S]+?directPassword = window\.prompt/],
   ['active app shell login guard', /hasAuthenticatedAppShell\(\)[\s\S]+?跳过协议登录提示/],
   ['no password persistence', /directPassword = ''/],
@@ -77,6 +89,16 @@ const required = [
 const missing = required.filter(([, pattern]) => !pattern.test(source));
 if (missing.length) {
   throw new Error(`source contract failed: ${missing.map(([name]) => name).join(', ')}`);
+}
+
+// Execute the small cookie reader against the casing used by the live page.
+// This catches a regression where AUTH/LOGINCODE/WORKSTATION are present but
+// the protocol path silently sees empty authentication headers.
+const cookieReaderMatch = source.match(/function readCookie\(name\) \{[\s\S]*?\n  \}/);
+if (!cookieReaderMatch) throw new Error('source contract failed: readCookie implementation missing');
+const readCookie = new Function('document', `${cookieReaderMatch[0]}; return readCookie;`)({ cookie: 'AUTH=auth-value; LOGINCODE=3607320012067; WORKSTATION=ws-value' });
+if (readCookie('Auth') !== 'auth-value' || readCookie('LoginCode') !== '3607320012067' || readCookie('WorkStation') !== 'ws-value') {
+  throw new Error('source contract failed: uppercase auth cookie lookup behavior');
 }
 
 // diagnosisActive is an entry mutex only. Monitoring and list refresh must keep
@@ -108,14 +130,17 @@ if (!/def captcha_answer/.test(ocrServer) || !/fullmatch/.test(ocrServer) || !/1
 }
 
 const state = JSON.parse(fs.readFileSync(path.join(root, 'PROJECT_STATE.json'), 'utf8'));
-if (state.version !== '0.8.40') throw new Error(`PROJECT_STATE version mismatch: ${state.version}`);
+if (state.version !== '0.8.41') throw new Error(`PROJECT_STATE version mismatch: ${state.version}`);
 if (state.performance?.realtimeListMinCooldownMs !== 500) throw new Error('PROJECT_STATE realtime cooldown mismatch');
 if (state.performance?.developerModeDefault !== true) throw new Error('PROJECT_STATE developer mode default mismatch');
 if (state.performance?.developerDebugRetentionMs !== 600000) throw new Error('PROJECT_STATE developer retention mismatch');
 if (state.performance?.developerDebugFullCandidateFields !== true) throw new Error('PROJECT_STATE full debug fields mismatch');
 if (state.performance?.credentialShapeDiagnostics !== true) throw new Error('PROJECT_STATE credential diagnostics mismatch');
 if (state.performance?.credentialValuesPersisted !== false) throw new Error('PROJECT_STATE credential persistence boundary mismatch');
-if (!readme.includes('源码版本：`0.8.40`')) throw new Error('README version mismatch');
+if (state.performance?.cookieNameCaseInsensitive !== true) throw new Error('PROJECT_STATE cookie case-insensitive lookup mismatch');
+if (state.lastObservedRuntime?.statusProbe !== 'code=2002 repeated; auth headers absent in script context') throw new Error('PROJECT_STATE runtime evidence mismatch');
+if (state.lastObservedRuntime?.entryEventsObserved !== 0) throw new Error('PROJECT_STATE runtime entry evidence mismatch');
+if (!readme.includes('源码版本：`0.8.41`')) throw new Error('README version mismatch');
 if (!readme.includes('127.0.0.1:18766')) throw new Error('README OCR endpoint missing');
 if (!readme.includes('GPT6_MAINTENANCE.md')) throw new Error('README GPT-6 guide missing');
 if (!gpt6Guide.includes('dispatchDelayMs') || !gpt6Guide.includes('diagnosisActive')) throw new Error('GPT-6 maintenance guide incomplete');

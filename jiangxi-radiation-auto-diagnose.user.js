@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         江西省县域医共体 - 自动诊断候选
 // @namespace    local.jiangxi.radiation
-// @version      0.8.40
+// @version      0.8.41
 // @updateURL   https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @downloadURL https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @description  以页面实时推送为主、轻量协议探测为兜底，按可配置规则识别后优先通过系统协议进入诊断；支持可控开发者诊断日志。
@@ -20,7 +20,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.8.40';
+  const SCRIPT_VERSION = '0.8.41';
 
   // 所有业务规则和页面定位都集中在这里，也可以从表头设置弹窗进入配置面板修改。
   const DEFAULT_CONFIG = {
@@ -524,7 +524,9 @@
   async function ensureDirectLogin() {
     const dl = directLoginConfig();
     if (!dl.enabled || !dl.username || directLoginRunning) return false;
-    if (document.cookie.includes('Auth=')) return false;
+    // Cookie 名称在当前部署中通常是大写（AUTH/LOGINCODE/WORKSTATION），
+    // 不能用大小写敏感的字符串包含判断，否则已登录页面会重复弹出密码框。
+    if (readCookie('Auth')) return false;
     directLoginRunning = true;
     try {
       // Auth may be HttpOnly or not yet mirrored into document.cookie. Probe the
@@ -597,10 +599,14 @@
     return bodyText.includes('医学影像资源共享中心') && (bodyText.includes('诊断') || bodyText.includes('登记')) && !bodyText.includes('请输入协议登录密码');
   }
   function readCookie(name) {
-    const prefix = `${encodeURIComponent(name)}=`;
-    const item = String(document.cookie || '').split(';').map(x => x.trim()).find(x => x.startsWith(prefix));
+    const wanted = encodeURIComponent(String(name || '')).toLowerCase();
+    const item = String(document.cookie || '').split(';').map(x => x.trim()).find(x => {
+      const index = x.indexOf('=');
+      return index > 0 && x.slice(0, index).trim().toLowerCase() === wanted;
+    });
     if (!item) return '';
-    try { return decodeURIComponent(item.slice(prefix.length)); } catch (_) { return item.slice(prefix.length); }
+    const value = item.slice(item.indexOf('=') + 1);
+    try { return decodeURIComponent(value); } catch (_) { return value; }
   }
   function loginIdentity() {
     const loginCode = norm(readCookie('LoginCode'));
@@ -731,7 +737,7 @@
     const statusCode = norm(
       row.dataset?.reportStatusCode || row.dataset?.checkStatusCode ||
       row.getAttribute('data-report-status-code') || row.getAttribute('data-check-status-code') ||
-      REPORT_STATUS_CODES?.[status] || ''
+      (/^\d+$/.test(status) ? status : REPORT_STATUS_CODES?.[status] || '')
     );
     const modality = norm(at('检查类型')?.innerText);
     const applyTime = norm(at('申请时间')?.innerText);
@@ -773,8 +779,10 @@
     const applicationNo = norm(record.applyNo || record.applicationNo || record.orderId);
     const exam = norm(record.examName || record.exam);
     const imageStatus = norm(record.imageStatus || (record.imageIsChange === 0 ? '正常' : record.imageIsChange === 1 ? '异常' : ''));
-    const statusCode = norm(record.reportStatusCode || record.checkStatusCode || record.statusCode);
-    const status = norm(record.reportStatus || record.reportStatusName || record.checkStatusName || record.status || REPORT_STATUS_NAMES[statusCode] || statusCode);
+    const rawStatus = norm(record.reportStatus || record.reportStatusName || record.checkStatusName || record.status);
+    const explicitStatusCode = norm(record.reportStatusCode || record.checkStatusCode || record.statusCode);
+    const statusCode = norm(explicitStatusCode || (/^\d+$/.test(rawStatus) ? rawStatus : REPORT_STATUS_CODES?.[rawStatus] || ''));
+    const status = norm(REPORT_STATUS_NAMES[statusCode] || rawStatus || statusCode);
     const locked = recordLockState(record);
     const modality = norm(Array.isArray(record.modality) ? record.modality.join(',') : (record.modality || record.modalityName));
     const applyTime = norm(record.checkinTime || record.applyTime || record.initiateTime);
@@ -925,14 +933,25 @@
     if (!diagnosisActive) return false;
     const rows = queryBodyRows();
     if (!rows.length) return true;
-    const owned = rows.some(row => {
-      const d = rowData(row);
-      return /诊断中/.test(norm(d.status)) && !!norm(d.doctor);
+    const dataRows = rows.map(rowData).filter(d => d.patient || d.status || d.exam || d.applicationNo);
+    // 报告页可能先渲染其它表格，再异步挂载右侧待诊断列表；
+    // 未识别到业务行时保持锁，避免误把报告编辑表格当成“无诊断中客户”。
+    if (!dataRows.length) return true;
+    const diagnosingCode = REPORT_STATUS_CODES?.['诊断中'] || '102502';
+    const owned = dataRows.some(d => {
+      return (/诊断中/.test(norm(d.status)) || norm(d.statusCode) === diagnosingCode) && !!norm(d.doctor);
     });
     if (owned) return true;
     diagnosisActive = false;
     developerLog('诊断锁释放', { reason: '列表中没有带诊断医生姓名的诊断中记录' });
     return false;
+  }
+
+  function isMonitorRoute(path = pageWindow().location.pathname) {
+    return path === '/radiation' || path === '/radiation/report';
+  }
+  function isListRoute(path = pageWindow().location.pathname) {
+    return path === '/radiation';
   }
 
   function clickDiagnose(d) {
@@ -1173,7 +1192,7 @@
   }
 
   async function enterDiagnosis(d) {
-    if (entryRunning || entryDiagnosisLockActive() || pageWindow().location.pathname !== '/radiation') return false;
+    if (entryRunning || entryDiagnosisLockActive() || !isMonitorRoute()) return false;
     if (d?.__entryBlocked) {
       developerLog('进入前硬门禁拒绝', { ...debugCandidate(d), reason: d.__entryBlocked });
       return false;
@@ -1266,7 +1285,7 @@
   async function refreshRemoteCandidates(options = {}) {
     // 诊断锁只禁止再次进入客户，不暂停列表读取。诊断页右侧仍可能显示待诊断列表，
     // 因此协议列表和实时线索继续运行，由 enterDiagnosis() 统一挡住第二次进入。
-    if (pageWindow().location.pathname !== '/radiation') return false;
+    if (!isMonitorRoute()) return false;
     const now = Date.now();
     const force = options.force === true;
     const match = options.match && typeof options.match === 'object' ? options.match : null;
@@ -1298,7 +1317,7 @@
   async function probeStatus() {
     // 协议探测不依赖表格 DOM，隐藏标签页也继续工作；浏览器冻结页面时则由 WebSocket
     // 消息在恢复后补上。DOM 扫描仍由 scan() 自己限制为前台执行。
-    if (!config.enabled || config.entryMode === 'click' || probeRunning || pageWindow().location.pathname !== '/radiation') return;
+    if (!config.enabled || config.entryMode === 'click' || probeRunning || !isMonitorRoute()) return;
     if (!accountAllowed()) return;
     probeRunning = true;
     const startedAt = Date.now();
@@ -1350,7 +1369,7 @@
   }
 
   function queueRealtimeRefresh(options = {}) {
-    if (!config.enabled || config.entryMode === 'click' || !config.realtimeHints || pageWindow().location.pathname !== '/radiation') return;
+    if (!config.enabled || config.entryMode === 'click' || !config.realtimeHints || !isMonitorRoute()) return;
     if (!accountAllowed()) return;
     if (options.match && typeof options.match === 'object') queuedRealtimeMatch = options.match;
     if (options.hintAt) queuedRealtimeHintAt = Number(options.hintAt) || queuedRealtimeHintAt;
@@ -1378,7 +1397,7 @@
   }
 
   async function processRealtimeHint(hint) {
-    if (!config.enabled || config.entryMode === 'click' || !config.realtimeHints || pageWindow().location.pathname !== '/radiation') return;
+    if (!config.enabled || config.entryMode === 'click' || !config.realtimeHints || !isMonitorRoute()) return;
     if (!accountAllowed()) return;
     if (!hint || typeof hint !== 'object') {
       queueRealtimeRefresh({ hintAt: Date.now() });
@@ -1605,7 +1624,7 @@
   }
 
   function scheduleAutoQueryFallback() {
-    if (!config.enabled || config.entryMode === 'click' || !config.realtimeHints || pageWindow().location.pathname !== '/radiation') return;
+    if (!config.enabled || config.entryMode === 'click' || !config.realtimeHints || !isMonitorRoute()) return;
     if (!config.pageQueryRefresh) return;
     if (document.visibilityState === 'visible' && lastRealtimeHintAt && Date.now() - lastRealtimeHintAt < 60000) return;
     if (autoQueryFallbackTimer || Date.now() - lastPageQueryAt < 15000) return;
@@ -1619,11 +1638,11 @@
 
   function schedulePageQueryHeartbeat(delay) {
     if (pageQueryHeartbeatTimer) clearTimeout(pageQueryHeartbeatTimer);
-    if (!config.enabled || config.entryMode === 'click' || !config.pageQueryRefresh || pageWindow().location.pathname !== '/radiation') return;
+    if (!config.enabled || config.entryMode === 'click' || !config.pageQueryRefresh || !isListRoute()) return;
     const interval = Math.max(15000, Number(config.listHeartbeatMs) || 15000);
     pageQueryHeartbeatTimer = setTimeout(async () => {
       pageQueryHeartbeatTimer = null;
-      if (config.enabled && config.entryMode !== 'click' && pageWindow().location.pathname === '/radiation') {
+      if (config.enabled && config.entryMode !== 'click' && isListRoute()) {
         const stale = Date.now() - lastPageQueryAt >= interval;
         // 实时提示刚到达时让 WebSocket 处理链路先完成；超过一个刷新周期仍无提示，
         // 自动查询一次页面，避免列表长期停留在旧结果。
@@ -1644,10 +1663,14 @@
     scheduleProbe(0);
   }
 
-  function start() {
-    if (pageWindow().location.pathname !== '/radiation') return;
+  function start(options = {}) {
+    if (!isMonitorRoute()) return;
     developerLog('运行版本', { source: 'runtime-start', version: SCRIPT_VERSION }, { force: true });
-    diagnosisActive = false;
+    // 首次启动可以清空旧锁；从诊断页/设置页返回列表时保留锁，
+    // 等列表行真正出现后由 entryDiagnosisLockActive 判断是否释放，
+    // 防止表格尚未渲染时抢先进入第二位客户。
+    const preserveDiagnosisLock = options.preserveDiagnosisLock ?? pageWindow().location.pathname === '/radiation/report';
+    if (!preserveDiagnosisLock) diagnosisActive = false;
     if (timer) clearInterval(timer);
     if (probeTimer) clearTimeout(probeTimer);
     if (realtimeRefreshTimer) clearTimeout(realtimeRefreshTimer);
@@ -1696,6 +1719,11 @@
     if (pageQueryHeartbeatTimer) { clearTimeout(pageQueryHeartbeatTimer); pageQueryHeartbeatTimer = null; }
     if (headerObserver) { headerObserver.disconnect(); headerObserver = null; }
     running = false; entryRunning = false; probeRunning = false; pageQueryRunning = false;
+    // 路由切换期间可能有旧的列表/推送 Promise 尚未完成；清掉运行门闩，
+    // 让返回列表后的新事件立即得到处理。异步完成时 enterDiagnosis 仍会
+    // 通过当前 pathname 硬门禁，不能在诊断页误进入。
+    listRefreshRunning = false;
+    realtimeRecordRunning = false;
     developerLog('运行时停止', { source: 'route-guard', reason, route: pageWindow().location.pathname });
   }
 
@@ -1921,18 +1949,32 @@
   let bootstrapped = false;
   function watchRoute() {
     const path = pageWindow().location.pathname;
+    let changed = false;
     if (path !== lastObservedPath) {
       const previous = lastObservedPath; lastObservedPath = path;
+      changed = true;
       developerLog('路由变化', { source: 'route-guard', from: previous || '(初始)', to: path }, { force: true });
-      if (path !== '/radiation') stopRuntime('route-exit');
+      if (!isMonitorRoute(path)) stopRuntime('route-exit');
     }
-    if (path === '/radiation' && !bootstrapped) bootstrap();
+    // SPA 从诊断页返回列表时 bootstrapped 仍为 true，但 stopRuntime 已经
+    // 清掉了所有定时器、Observer 和运行状态。必须在每次真正回到列表页时
+    // 重建运行时，否则第一次进入成功后后续候选永远不会再被处理。
+    if (isMonitorRoute(path) && changed) {
+      if (!bootstrapped) bootstrap();
+      else {
+        headerObserver = new MutationObserver(attachToHeaderSettings);
+        if (document.body) headerObserver.observe(document.body, { childList: true, subtree: true });
+        attachToHeaderSettings();
+        developerLog('运行时重启', { source: 'route-guard', reason: '返回待诊断列表' }, { force: true });
+        start({ preserveDiagnosisLock: true });
+      }
+    }
   }
   const bootstrap = async () => {
     // 门户跳转到影像页时，Vue 可能先替换文档再触发 DOMContentLoaded；
     // 登录页也需要启动，用于第二次以后直接协议登录。
     const currentUrl = pageWindow().location;
-    if (currentUrl.host === '10.10.94.90:22100' || !['/login', '/radiation'].includes(currentUrl.pathname)) {
+    if (currentUrl.host === '10.10.94.90:22100' || !['/login', '/radiation', '/radiation/report'].includes(currentUrl.pathname)) {
       return;
     }
     if (bootstrapped) return;
@@ -1952,7 +1994,10 @@
     headerObserver = new MutationObserver(attachToHeaderSettings);
     if (document.body) headerObserver.observe(document.body, { childList: true, subtree: true });
     attachToHeaderSettings();
-    start();
+    // 直接打开诊断页时无法证明右侧待诊断列表已经挂载；先保守锁住入口，
+    // 待业务行出现后由 entryDiagnosisLockActive 决定是否释放。
+    if (currentUrl.pathname === '/radiation/report') diagnosisActive = true;
+    start({ preserveDiagnosisLock: currentUrl.pathname === '/radiation/report' });
   };
   lastObservedPath = pageWindow().location.pathname;
   routeWatchTimer = setInterval(watchRoute, 1000);
