@@ -16,8 +16,10 @@ try {
   fs.mkdirSync(path.join(fixture, 'tests'));
   fs.copyFileSync(path.join(root, 'tools/verify-release.ps1'), path.join(fixture, 'tools/verify-release.ps1'));
   // The fixture focuses on stage-specific PowerShell failures; keep the new
-  // lifecycle stage present but neutral so it does not mask the intended case.
+  // lifecycle and direct-login stages present but neutral so they do not mask
+  // the intended case.
   fs.writeFileSync(path.join(fixture, 'tests/lifecycle-diagnostics.test.mjs'), 'process.exit(0);');
+  fs.writeFileSync(path.join(fixture, 'tests/direct-login.test.mjs'), 'process.exit(0);');
   const cases = [
     ['syntax', 'function {', 'process.exit(0)', 'pass', 'JavaScript syntax check failed'],
     ['contract', 'void 0;', 'process.exit(2)', 'pass', 'Source contract check failed'],

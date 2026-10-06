@@ -16,6 +16,7 @@ try {
 
   node --check .\jiangxi-radiation-auto-diagnose.user.js
   node .\tests\source-contract.test.mjs
+  node .\tests\direct-login.test.mjs
   node .\tests\lifecycle-diagnostics.test.mjs
   node .\tests\release-failure.test.mjs
   if ($SkipOcrHealth) {

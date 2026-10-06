@@ -7,13 +7,13 @@
 - 快照日期：2026-10-05
 - 工作目录：`C:\Users\Lenovo\AppData\Roaming\Quant000150v9.5\Quant\Strategy\用户策略\app\江西省县域医共体-自动诊断候选`
 - 源码文件：`jiangxi-radiation-auto-diagnose.user.js`
-- 源码版本：`0.8.45`
+- 源码版本：`0.8.46`
 - 当前目标：通过已有 WebSocket 和只读协议稳定发现候选，服务端授权通过后进入诊断；保持单客户诊断串行、服务器低负载和可回退。
 
 ### GPT-6 接管须知
 
 - 以主文件元数据、Git 提交和浏览器运行日志为三类独立证据；源码版本不等于 Tampermonkey 已加载版本。
-- 当前源码版本为 `0.8.45`，最新提交以当前仓库 `HEAD` 为准。0.8.34 将 WebSocket 列表调度窗口压到 250ms，并记录 `dispatchDelayMs`/`withinOneSecond`；0.8.35 规范化“不限”配置并在 TOKEN_FAIL 后使用受控页面查询兜底；0.8.36 将开发者记录改为默认开启并保留最近 10 分钟完整候选字段；0.8.37 增加认证上下文形状诊断；0.8.38 在启动事件中保存实际选中的过滤值；0.8.39 每分钟清理并回写过期调试记录，保证十分钟窗口真正落盘生效；0.8.40 在启动记录中明确写入运行版本，方便确认 Tampermonkey 实际加载的是哪一版；0.8.41 修复 SPA 返回 `/radiation` 后运行时不重启导致后续客户不再处理的问题，并兼容 `AUTH/LOGINCODE/WORKSTATION` 这类大写会话 Cookie，避免协议请求缺少认证头；报告页 `/radiation/report` 继续运行 WebSocket、状态探测和只读列表处理，页面查询按钮仍只在 `/radiation` 使用；直接打开报告页先保守保持诊断锁，等右侧业务列表可读后再释放；0.8.42 将“检测到其他用户锁定的记录时跳过”做成可保存设置，默认开启，关闭后仍保留待诊断状态和服务端允许进入门禁；0.8.43 增加候选生命周期关联，记录首次/最近观察、规则通过、入口等待、协议响应、前后状态变化和疑似被其它用户抢先进入的完整十分钟证据；0.8.44 修复 WebSocket 只带部分字段时按错误患者字符串查询、服务端组合筛选返回空导致候选无法补全的问题，对单条实时线索执行一次有界的姓名精确兜底查询，再由客户端重新执行完整规则；0.8.45 将自动打开与只读监控拆成独立开关：关闭“启用自动打开”时仍保持 WebSocket、statusNum、只读列表、页面观察、自愈和十分钟开发者日志，但任何协议进入或页面点击都被硬门禁拦截；同时 OCR 启动器会先检查端口健康接口，避免误复用其它服务占用的 18766 端口。GPT-6 可先运行 `tools/gpt6-quick-maintenance.ps1` 在五分钟内完成回归和证据定位。`diagnosisActive` 只防止诊断中再次进入其它客户，不暂停列表刷新、状态探测或 WebSocket 观察。若列表中没有带诊断医生姓名的“诊断中”记录，入口锁会自动释放。设置面板现已补齐检查医院、检查部位、诊断医生和审核时间筛选，并可通过“更新所有可选项目”缓存动态选项；自检会比较本地版本与 GitHub Raw 版本并提示是否同步。CI 还覆盖发布失败保护测试。
+- 当前源码版本为 `0.8.46`，最新提交以当前仓库 `HEAD` 为准。0.8.34 将 WebSocket 列表调度窗口压到 250ms，并记录 `dispatchDelayMs`/`withinOneSecond`；0.8.35 规范化“不限”配置并在 TOKEN_FAIL 后使用受控页面查询兜底；0.8.36 将开发者记录改为默认开启并保留最近 10 分钟完整候选字段；0.8.37 增加认证上下文形状诊断；0.8.38 在启动事件中保存实际选中的过滤值；0.8.39 每分钟清理并回写过期调试记录，保证十分钟窗口真正落盘生效；0.8.40 在启动记录中明确写入运行版本，方便确认 Tampermonkey 实际加载的是哪一版；0.8.41 修复 SPA 返回 `/radiation` 后运行时不重启导致后续客户不再处理的问题，并兼容 `AUTH/LOGINCODE/WORKSTATION` 这类大写会话 Cookie，避免协议请求缺少认证头；报告页 `/radiation/report` 继续运行 WebSocket、状态探测和只读列表处理，页面查询按钮仍只在 `/radiation` 使用；直接打开报告页先保守保持诊断锁，等右侧业务列表可读后再释放；0.8.42 将“检测到其他用户锁定的记录时跳过”做成可保存设置，默认开启，关闭后仍保留待诊断状态和服务端允许进入门禁；0.8.43 增加候选生命周期关联，记录首次/最近观察、规则通过、入口等待、协议响应、前后状态变化和疑似被其它用户抢先进入的完整十分钟证据；0.8.44 修复 WebSocket 只带部分字段时按错误患者字符串查询、服务端组合筛选返回空导致候选无法补全的问题，对单条实时线索执行一次有界的姓名精确兜底查询，再由客户端重新执行完整规则；0.8.45 将自动打开与只读监控拆成独立开关：关闭“启用自动打开”时仍保持 WebSocket、statusNum、只读列表、页面观察、自愈和十分钟开发者日志，但任何协议进入或页面点击都被硬门禁拦截；0.8.46 修复协议登录认证链路，统一复用业务会话头，写入大写会话 Cookie，并严格计算算式验证码。GPT-6 可先运行 `tools/gpt6-quick-maintenance.ps1` 在五分钟内完成回归和证据定位。`diagnosisActive` 只防止诊断中再次进入其它客户，不暂停列表刷新、状态探测或 WebSocket 观察。若列表中没有带诊断医生姓名的“诊断中”记录，入口锁会自动释放。设置面板现已补齐检查医院、检查部位、诊断医生和审核时间筛选，并可通过“更新所有可选项目”缓存动态选项；自检会比较本地版本与 GitHub Raw 版本并提示是否同步。CI 还覆盖发布失败保护测试。
 - WebSocket 有报告编号但状态字段为空时，允许调用 `assertAllowEnter`，由服务端决定是否仍是可进入的待诊断记录；没有报告编号才走列表兜底。
 - 服务端 `statusNum` 或窄列表返回业务码 2002 时，不能循环高频重试；状态探测使用无筛选全局计数，列表回退使用最近列表并在客户端过滤。
 - “检测到其他用户锁定的记录时跳过”默认开启；开启时“当前报告已被其他用户锁定”、诊断中、待审核、审核中、已审核和已打印记录必须跳过。关闭该选项只放宽客户端锁定跳过，仍需待诊断状态和服务端允许进入校验，不能绕过业务拒绝。
@@ -36,7 +36,7 @@
 12. 0.8.2 增加页面重新聚焦后的低频“查询”补偿：只在 `visibilitychange` 或窗口 `focus` 时点击一次查询按钮，等待列表刷新后再扫描，避免后台停留后必须手工点击查询。
 13. 0.8.3 将 WebSocket 提示设为主触发：完整推送直接协议进入，不完整推送按申请单号/患者/项目线索读取窄列表；状态探测不再因标签页隐藏而停止，后台改为至少 15 秒低频兜底，并保留并发、冷却和失败退避。
 14. 0.8.3 首次协议请求按需读取 `/api/admin/user/info`，在内存补齐页面请求使用的 `LOGIN-USER-UID` 和必要 `USER-INFO` 头，针对真实页面曾出现的 `TOKEN_FAIL` 增加完整会话头路径。
-15. 0.8.4 增加开发者模式开关；当前 0.8.45 默认开启，滚动保留最近 10 分钟的完整候选字段和流程事件，最多 240 条，便于直接复盘实时推送、规则过滤、协议校验、入口结果和耗时。认证上下文额外记录凭证存在性、长度、短哈希和请求头覆盖情况，但不保存 Cookie、Authorization 原文或密码；设置面板可复制或清空记录。
+15. 0.8.4 增加开发者模式开关；当前 0.8.46 默认开启，滚动保留最近 10 分钟的完整候选字段和流程事件，最多 240 条，便于直接复盘实时推送、规则过滤、协议校验、入口结果和耗时。认证上下文额外记录凭证存在性、长度、短哈希和请求头覆盖情况，但不保存 Cookie、Authorization 原文或密码；设置面板可复制或清空记录。
 16. 进入安全门禁要求记录在真正进入前仍是待诊断（当前状态码 `102501`）。默认开启的“检测到其他用户锁定的记录时跳过”会检查列表原始 `isLock` 等字段和页面解锁图标；诊断中、待审核、审核中、已审核、已打印或页面明确提示“当前报告已被其他用户锁定”的记录必须跳过，不调用 `assertAllowEnter`，也不能通过页面按钮回退绕过门禁。关闭该设置后只允许客户端尝试锁定记录，服务端仍可拒绝。
 17. 0.8.7 增加页面查询心跳：WebSocket 长时间无业务提示时，以不低于 15 秒的单次定时器自动触发页面原生“查询”，同时保留查询并发锁和冷却保护，避免必须手工点击。
 18. 已通过 US 隧道建立只用于当前调试的门户访问链路：门户入口端口为 `19215`，影像入口端口为 `19213`；两者均已从公网路径返回 HTTP 200。
@@ -129,13 +129,19 @@
 
 - The script now has a settings section for an optional direct login account. It stores only the account name; the password is requested for the current page session and is cleared after the attempt.
 - Login sequence matches the radiation app: `GET /api/admin/userLogin/keyPair`, `GET /api/admin/userLogin/captcha`, then `POST /api/admin/userLogin/login?username=...&password=...&code=...&uuid=...`; the password is RSA-encrypted with the returned key pair.
-- The CAPTCHA is shown in an in-page dialog for manual entry. The shopgpt-daily-benefit OCR design was used as a reference for the image/retry boundary, but its Python `ddddocr` runtime is not embedded in the userscript. An OCR endpoint field is reserved for a separately deployed, same-host helper and is not called unless implemented.
+- The CAPTCHA is shown in an in-page dialog for manual entry. The shopgpt-daily-benefit OCR design was used as a reference for the image/retry boundary; the separately deployed loopback `ddddocr` helper is now called when enabled, with manual fallback.
 - Do not persist the supplied password or add it to logs, exports, profiles, or documentation. Runtime proof still requires loading 0.8.15 in Tampermonkey and completing one login with a test account.
 
 ## 2026-10-01 continuation: direct login from /login (0.8.16)
 
 - The bootstrap route now accepts both /login and /radiation. When direct protocol login is enabled and the page has no Auth cookie, /login obtains the RSA key pair and CAPTCHA, submits the login request, then redirects to /radiation after success.
 - The first portal jump remains supported; later visits can start at /login without opening the portal. Password remains session-only and is not stored.
+
+## 2026-10-06 continuation: direct login authentication repair (0.8.46)
+
+- Live Edge evidence showed `/api/admin/user/info` returns business `2002` when called with cookies alone, but succeeds when `Authorization` is copied from uppercase `AUTH`. The direct-login sequence now uses the same bounded request wrapper as monitoring, so `Authorization`, `LOGIN-USER-KEY`, `LOGIN-USER-UID`, `LOGIN-CLIENT-IP`, `USER-INFO`, `WORKCODE` and `sign` are applied consistently.
+- Login tokens are validated as non-empty strings and written as `AUTH`, `LOGINCODE` and `WORKSTATION`, matching the application storage helper. Mixed-case values from older script versions are removed before writing canonical values.
+- CAPTCHA answers are validated without digit stripping; safe arithmetic is evaluated in the userscript as a second boundary, so `99-40=` becomes `59` and malformed OCR text is rejected. `tests/direct-login.test.mjs` covers the mocked flow and header/cookie behavior. Real login still requires browser runtime verification.
 
 ## 2026-10-01 continuation: candidate priority and unlimited age (0.8.17)
 

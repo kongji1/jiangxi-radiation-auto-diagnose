@@ -1,5 +1,13 @@
 # 验证记录
 
+## 0.8.46 本地回归验证（2026-10-06）
+
+- `node --check jiangxi-radiation-auto-diagnose.user.js`：通过。
+- `node tests/direct-login.test.mjs`：通过，使用模拟密钥、算式验证码、登录令牌和用户信息响应，验证认证请求选项、`AUTH/LOGINCODE/WORKSTATION` Cookie、空/对象令牌拒绝和 `Authorization`/登录用户头复用。
+- 协议登录修复依据当前 Edge 已登录会话实测：`/api/admin/user/info` 只带 Cookie 会返回 `2002`，带 `Authorization`（来自大写 `AUTH` Cookie）返回业务成功；因此登录探测和登录后用户信息请求已统一走会话请求封装。
+- `node tests/source-contract.test.mjs`（91 项）、`node tests/lifecycle-diagnostics.test.mjs`、`node tests/release-failure.test.mjs`、`python tests/captcha_ocr.test.py`：通过；真实验证码登录和 Tampermonkey 加载版本仍需浏览器运行态确认。
+- 未保存密码、Cookie 或 Authorization 原文；门户密码是否与协议登录密码相同仍需用户在业务侧确认，不能由本地测试推断。
+
 ## 0.8.45 本地回归验证（2026-10-05）
 
 - `node --check jiangxi-radiation-auto-diagnose.user.js`：通过。

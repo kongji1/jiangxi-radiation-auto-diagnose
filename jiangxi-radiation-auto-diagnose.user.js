@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         江西省县域医共体 - 自动诊断候选
 // @namespace    local.jiangxi.radiation
-// @version      0.8.45
+// @version      0.8.46
 // @updateURL   https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @downloadURL https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @description  以页面实时推送为主、轻量协议探测为兜底，按可配置规则识别后优先通过系统协议进入诊断；支持可控开发者诊断日志。
@@ -20,7 +20,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.8.45';
+  const SCRIPT_VERSION = '0.8.46';
 
   // 所有业务规则和页面定位都集中在这里，也可以从表头设置弹窗进入配置面板修改。
   const DEFAULT_CONFIG = {
@@ -30,7 +30,7 @@
     monitoringEnabled: true,
     // 默认开启完整诊断记录；仅保留最近 10 分钟，关闭后按用户选择持久化。
     developerMode: true,
-    developerModeDebugWindowVersion: '0.8.45',
+    developerModeDebugWindowVersion: '0.8.46',
     // [] 表示不限登录账号；填写账号编号或登录名后，仅对匹配账号启用自动诊断。
     allowedAccounts: [],
     // 协议登录只保存账号，不保存密码；密码仅在当前页面会话内存中使用。
@@ -486,6 +486,84 @@
     return w.RSAUtils.encryptedString(pair, encodeURIComponent(password));
   }
 
+  // 协议登录验证码有两种形态：门户通常是四位数字，影像协议登录常见
+  // “99-40=”这类算式。只接受完整数字或受限算式，避免把 OCR 误识别的
+  // “99-40=”直接拼成“9940”提交。
+  function normalizeCaptchaAnswer(raw) {
+    const text = String(raw ?? '').trim().replace(/[×xX]/g, '*').replace(/÷/g, '/');
+    const expression = text.match(/^(\d{1,3})\s*([+\-*/])\s*(\d{1,3})\s*=?$/);
+    if (expression) {
+      const left = Number(expression[1]);
+      const right = Number(expression[3]);
+      let value;
+      if (expression[2] === '+') value = left + right;
+      else if (expression[2] === '-') value = left - right;
+      else if (expression[2] === '*') value = left * right;
+      else if (right !== 0) value = Math.floor(left / right);
+      if (Number.isInteger(value) && value >= 0 && value <= 9999) return String(value);
+      return '';
+    }
+    return /^\d{1,4}$/.test(text) ? text : '';
+  }
+
+  function setSessionCookie(name, value) {
+    const text = String(value ?? '').trim();
+    if (!text) return false;
+    const canonical = String(name || '').toUpperCase();
+    if (!canonical) return false;
+    // The Vue app's storage helper uppercases these names before writing them
+    // (AUTH/LOGINCODE/WORKSTATION). Remove values written by older script
+    // versions first so a stale mixed-case value cannot win readCookie().
+    const aliases = canonical === 'AUTH' ? ['Auth', 'AUTH'] : canonical === 'LOGINCODE' ? ['LoginCode', 'LOGINCODE'] : canonical === 'WORKSTATION' ? ['WorkStation', 'WORKSTATION'] : [name, canonical];
+    for (const legacy of aliases) {
+      try { document.cookie = `${legacy}=; Max-Age=0; path=/`; } catch (_) {}
+    }
+    try {
+      document.cookie = `${canonical}=${encodeURIComponent(text)}; Max-Age=604800; path=/`;
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  async function directLoginRequest(url, options = {}, timeoutMs = 6000) {
+    // Keep the login sequence on the same bounded protocol path as list/status
+    // requests. __tokenRecoveryRetry prevents a failed anonymous probe from
+    // recursively probing user info or redirecting the active page.
+    const result = await fetchJson(url, { ...options, __tokenRecoveryRetry: true }, timeoutMs);
+    if (!result?.payload || !result.response?.ok) {
+      throw new Error(`协议登录请求失败(${result?.response?.status || 'network'})`);
+    }
+    return result.payload;
+  }
+
+  // Kept as a small dependency-injected unit so login behavior can be tested
+  // with mocked keyPair/captcha/login/info responses without storing a password.
+  async function performDirectLogin({ username, password, request, captchaResolver, encryptPassword, writeCookie } = {}) {
+    if (!username || !password || typeof request !== 'function' || typeof captchaResolver !== 'function' || typeof encryptPassword !== 'function' || typeof writeCookie !== 'function') {
+      throw new Error('协议登录参数不完整');
+    }
+    const keyJson = await request('/api/admin/userLogin/keyPair', { method: 'GET', credentials: 'include', headers: { Accept: 'application/json' } });
+    const key = keyJson?.data;
+    if (keyJson?.code !== 200 || !key?.ownModulus || !key?.exponent) throw new Error('登录密钥获取失败');
+    const capJson = await request('/api/admin/userLogin/captcha', { method: 'GET', credentials: 'include', headers: { Accept: 'application/json' } });
+    const captcha = capJson?.data;
+    if (capJson?.code !== 200 || !captcha?.uuid) throw new Error('登录验证码参数获取失败');
+    const captchaEnabled = captcha.captchaEnabled !== false;
+    const code = captchaEnabled ? normalizeCaptchaAnswer(await captchaResolver(captcha.img || '')) : '';
+    if (captchaEnabled && !code) throw new Error('验证码识别失败');
+    const params = new URLSearchParams({ username: String(username), password: encryptPassword(password, key), code, uuid: String(captcha.uuid) });
+    const loginJson = await request(`/api/admin/userLogin/login?${params.toString()}`, { method: 'POST', credentials: 'include', headers: { Accept: 'application/json' } });
+    const authToken = typeof loginJson?.data === 'string' ? loginJson.data.trim() : '';
+    if (loginJson?.code !== 200 || !authToken) throw new Error(loginJson?.message || '协议登录失败');
+    if (!writeCookie('AUTH', authToken)) throw new Error('协议登录令牌写入失败');
+    const infoJson = await request('/api/admin/user/info', { method: 'GET', credentials: 'include', headers: { Accept: 'application/json' } });
+    if (infoJson?.code !== 200 || !infoJson.data || typeof infoJson.data !== 'object') throw new Error('登录成功但用户信息未返回');
+    if (infoJson.data.logincode) writeCookie('LOGINCODE', infoJson.data.logincode);
+    if (infoJson.data.workStationList?.[0]?.code) writeCookie('WORKSTATION', infoJson.data.workStationList[0].code);
+    return { token: authToken, info: infoJson.data };
+  }
+
   async function recognizeCaptcha(imageBase64) {
     const dl = directLoginConfig();
     if (dl.ocrEnabled === false || !dl.ocrEndpoint || !imageBase64) return '';
@@ -505,10 +583,11 @@
             .then(resolve, reject);
         }
       });
+      if (Number(result.status) && Number(result.status) !== 200) throw new Error(`OCR HTTP ${result.status}`);
       const payload = JSON.parse(result.responseText || '{}');
-      const code = String(payload.code || '').replace(/\D/g, '');
-      if (payload.ok === true && /^\d{1,4}$/.test(code)) {
-        developerLog('验证码自动识别成功', { source: 'local-ocr', digits: 4 });
+      const code = normalizeCaptchaAnswer(payload.code);
+      if (payload.ok === true && code) {
+        developerLog('验证码自动识别成功', { source: 'local-ocr', digits: code.length });
         return code;
       }
     } catch (e) {
@@ -524,7 +603,7 @@
       box.style.cssText = 'position:fixed;z-index:2147483647;left:50%;top:50%;transform:translate(-50%,-50%);background:#fff;border:1px solid #409eff;border-radius:8px;padding:14px;box-shadow:0 10px 35px #0005;font:14px Segoe UI,Microsoft Yahei,sans-serif;width:260px';
       box.innerHTML = '<b>协议登录验证码</b><div style="margin:10px 0;text-align:center"><img style="max-width:220px;height:64px;object-fit:contain;border:1px solid #ddd"/></div><input style="box-sizing:border-box;width:100%;padding:7px" maxlength="8" placeholder="请输入验证码"><div style="display:flex;gap:7px;justify-content:flex-end;margin-top:10px"><button type="button" data-c="cancel">取消</button><button type="button" data-c="ok" style="background:#409eff;color:#fff;border:0;border-radius:4px;padding:6px 12px">登录</button></div>';
       box.querySelector('img').src = `data:image/jpeg;base64,${imageBase64}`;
-      const finish = value => { box.remove(); resolve(value); };
+      const finish = value => { box.remove(); resolve(normalizeCaptchaAnswer(value)); };
       box.querySelector('[data-c="cancel"]').onclick = () => finish('');
       box.querySelector('[data-c="ok"]').onclick = () => finish(box.querySelector('input').value.trim());
       box.querySelector('input').addEventListener('keydown', e => { if (e.key === 'Enter') box.querySelector('[data-c="ok"]').click(); });
@@ -535,18 +614,14 @@
   async function ensureDirectLogin() {
     const dl = directLoginConfig();
     if (!dl.enabled || !dl.username || directLoginRunning) return false;
-    // Cookie 名称在当前部署中通常是大写（AUTH/LOGINCODE/WORKSTATION），
-    // 不能用大小写敏感的字符串包含判断，否则已登录页面会重复弹出密码框。
-    if (readCookie('Auth')) return false;
     directLoginRunning = true;
     try {
-      // Auth may be HttpOnly or not yet mirrored into document.cookie. Probe the
-      // read-only user endpoint before asking for a password so a logged-in page
-      // never shows a needless protocol-login prompt on refresh.
-      const sessionProbe = await fetch('/api/admin/user/info', { credentials: 'include', headers: { Accept: 'application/json' } });
+      // The application interceptor always promotes AUTH to Authorization.
+      // Probe through the same helper before asking for a password; a portal
+      // session therefore never gets an unnecessary protocol-login prompt.
       let sessionPayload = null;
-      try { sessionPayload = await sessionProbe.json(); } catch (_) {}
-      if (sessionProbe.ok && sessionPayload?.code === 200 && sessionPayload.data) {
+      try { sessionPayload = await directLoginRequest('/api/admin/user/info', { method: 'GET', credentials: 'include', headers: { Accept: 'application/json' } }); } catch (_) {}
+      if (sessionPayload?.code === 200 && sessionPayload.data) {
         sessionIdentity = { info: sessionPayload.data, uid: norm(sessionPayload.data.uid), loading: false, lastAttemptAt: Date.now(), loadedAt: Date.now() };
         return true;
       }
@@ -555,9 +630,20 @@
       // 只读检查已渲染的用户头部；不向服务端写入任何内容，也不把它当作登录凭证。
       // Vue 工作台在部分机器上会在 2~3 秒后才挂载用户头部；过早弹窗会
       // 抢在工作台完成恢复前打断用户。把检查窗口延长到约 5 秒，仍然只读。
+      // If AUTH exists but the server rejected it, the cookie is stale and the
+      // configured account must be allowed to recover. Only use the visual
+      // shell shortcut when AUTH is unavailable (for example HttpOnly).
       for (const delay of [0, 250, 800, 1600, 3000]) {
         if (delay) await new Promise(resolve => setTimeout(resolve, delay));
-        if (hasAuthenticatedAppShell()) {
+        if (readCookie('Auth')) {
+          try {
+            const retryPayload = await directLoginRequest('/api/admin/user/info', { method: 'GET', credentials: 'include', headers: { Accept: 'application/json' } });
+            if (retryPayload?.code === 200 && retryPayload.data) {
+              sessionIdentity = { info: retryPayload.data, uid: norm(retryPayload.data.uid), loading: false, lastAttemptAt: Date.now(), loadedAt: Date.now() };
+              return true;
+            }
+          } catch (_) {}
+        } else if (hasAuthenticatedAppShell()) {
           console.info('[自动诊断] 检测到已登录工作台，跳过协议登录提示');
           return true;
         }
@@ -566,23 +652,18 @@
         directPassword = window.prompt('请输入协议登录密码（仅本次页面会话使用，不会保存）') || '';
         if (!directPassword) return false;
       }
-      const keyRes = await fetch('/api/admin/userLogin/keyPair', { credentials: 'include', headers: { Accept: 'application/json' } });
-      const keyJson = await keyRes.json();
-      const capRes = await fetch('/api/admin/userLogin/captcha', { credentials: 'include', headers: { Accept: 'application/json' } });
-      const capJson = await capRes.json();
-      if (keyJson.code !== 200 || capJson.code !== 200 || !capJson.data?.img || !capJson.data?.uuid) throw new Error('登录参数获取失败');
-      // 优先调用本机 ddddocr 桥自动识别；桥不可用或识别失败时保留手工输入。
-      const code = await recognizeCaptcha(capJson.data.img) || await askCaptcha(capJson.data.img);
-      if (!code) return false;
-      const params = new URLSearchParams({ username: dl.username, password: rsaPassword(directPassword, keyJson.data), code, uuid: capJson.data.uuid });
-      const loginRes = await fetch(`/api/admin/userLogin/login?${params.toString()}`, { method: 'POST', credentials: 'include', headers: { Accept: 'application/json' } });
-      const loginJson = await loginRes.json();
-      if (loginJson.code !== 200 || !loginJson.data) throw new Error(loginJson.message || '协议登录失败');
-      document.cookie = `Auth=${encodeURIComponent(loginJson.data)}; path=/`;
-      const info = await fetch('/api/admin/user/info', { credentials: 'include', headers: { Accept: 'application/json' } }).then(r => r.json());
-      if (info.code !== 200 || !info.data) throw new Error('登录成功但用户信息未返回');
-      if (info.data.logincode) document.cookie = `LoginCode=${encodeURIComponent(info.data.logincode)}; path=/`;
-      if (info.data.workStationList?.[0]?.code) document.cookie = `WorkStation=${encodeURIComponent(info.data.workStationList[0].code)}; path=/`;
+      // Do not carry a previous account's LOGIN-USER-* / USER-INFO headers
+      // into the fresh token exchange or its post-login user-info request.
+      sessionIdentity = { info: null, uid: '', loading: false, lastAttemptAt: 0, loadedAt: 0 };
+      const result = await performDirectLogin({
+        username: dl.username,
+        password: directPassword,
+        request: directLoginRequest,
+        captchaResolver: async image => await recognizeCaptcha(image) || await askCaptcha(image),
+        encryptPassword: rsaPassword,
+        writeCookie: setSessionCookie
+      });
+      sessionIdentity = { info: result.info, uid: norm(result.info.uid), loading: false, lastAttemptAt: Date.now(), loadedAt: Date.now() };
       directPassword = '';
       console.info('[自动诊断] 协议登录成功');
       return true;

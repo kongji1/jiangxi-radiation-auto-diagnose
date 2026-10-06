@@ -13,7 +13,7 @@
 
 完整业务基址是 `http://10.10.94.90:22112`，脚本使用相对路径，避免写死不同会话的来源。
 
-页面前端把当前会话的 `Auth` Cookie 转为 `Authorization` 请求头，并附带 `LOGIN-USER-KEY`、`LOGIN-USER-UID`、`WORKCODE` 和必要的 `USER-INFO`。脚本会在首次协议请求前按需读取当前登录用户信息，在内存中复用这些请求头，不保存认证值；前端包中的 `code: 2002` 对应 `TOKEN_FAIL`，遇到该返回时不能把它当成“没有候选记录”。
+页面前端把当前会话的 `AUTH` Cookie 转为 `Authorization` 请求头，并附带 `LOGIN-USER-KEY`、`LOGIN-USER-UID`、`LOGIN-CLIENT-IP`、`WORKCODE` 和必要的 `USER-INFO`。脚本会在首次协议请求前按需读取当前登录用户信息，在内存中复用这些请求头，不保存认证值；直接协议登录的密钥、验证码、登录和用户信息请求也使用同一封装，并按应用约定写入大写 `AUTH/LOGINCODE/WORKSTATION` Cookie。前端包中的 `code: 2002` 对应 `TOKEN_FAIL`，遇到该返回时不能把它当成“没有候选记录”。
 
 页面表格由业务前端的“查询”按钮刷新。0.8.2 在页面从后台恢复或窗口重新获得焦点时最多触发一次查询，等待短暂刷新后再扫描当前表格；这只用于把前台展示同步到最新状态，不是后台实时链路。
 

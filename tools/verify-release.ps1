@@ -11,6 +11,8 @@ try {
   if ($LASTEXITCODE -ne 0) { throw 'JavaScript syntax check failed' }
   node .\tests\source-contract.test.mjs
   if ($LASTEXITCODE -ne 0) { throw 'Source contract check failed' }
+  node .\tests\direct-login.test.mjs
+  if ($LASTEXITCODE -ne 0) { throw 'Direct login tests failed' }
   node .\tests\lifecycle-diagnostics.test.mjs
   if ($LASTEXITCODE -ne 0) { throw 'Lifecycle diagnostics check failed' }
   python .\tests\captcha_ocr.test.py

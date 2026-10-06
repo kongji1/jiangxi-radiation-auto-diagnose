@@ -1,14 +1,14 @@
 {
   "project": "江西省县域医共体 - 自动诊断候选",
   "source": "jiangxi-radiation-auto-diagnose.user.js",
-  "version": "0.8.45",
-  "snapshotDate": "2026-10-05",
+  "version": "0.8.46",
+  "snapshotDate": "2026-10-06",
   "sourceOfTruth": "jiangxi-radiation-auto-diagnose.user.js",
   "handoff": "docs/AI_HANDOFF.md",
   "protocol": "docs/PROTOCOL.md",
   "verification": "docs/VERIFICATION.md",
-  "tampermonkeyLoadedVersion": "0.8.44 observed via current Edge CUA/CDP runtime-start log on 2026-10-05; local source is 0.8.45",
-  "liveVerification": "Source contract, syntax, lifecycle synthetic transition, release-failure, and arithmetic CAPTCHA bridge tests pass for 0.8.45. Current Edge CUA/CDP runtime-start logging proves Tampermonkey is running 0.8.44, so the browser is one version behind the local 0.8.45 source. Auto-open can be disabled independently from read-only monitoring: WebSocket/status/list observation, developer diagnostics, and self-healing route/session checks continue while no protocol or page entry is attempted. Developer events retain full candidate fields locally for a rolling ten-minute window, are periodically purged and persisted, record credential shape diagnostics without persisting raw credentials, snapshot selected filter values at runtime start, emit an explicit runtime version event, and correlate candidate lifecycle timestamps, list request ids, protocol responses, and lock/status transitions. GitHub Raw publication and the 0.8.45 browser update remain unverified.",
+  "tampermonkeyLoadedVersion": "0.8.44 observed via current Edge CUA/CDP runtime-start log on 2026-10-05; local source is 0.8.46",
+  "liveVerification": "Source syntax, mocked direct-login flow, source contract, lifecycle synthetic transition, release-failure, and arithmetic CAPTCHA bridge tests pass for 0.8.46. Current Edge CUA/CDP runtime-start logging still proves Tampermonkey is running 0.8.44, so the browser is one version behind the local 0.8.46 source. The direct-login fix now sends the same Authorization and login-user headers as the page interceptor, writes canonical uppercase session cookies, rejects malformed tokens, and evaluates arithmetic CAPTCHA answers without digit stripping. Real protocol login and GitHub Raw publication remain unverified.",
   "lastObservedRuntime": {
     "capturedAt": "2026-10-05T12:16:16.325Z",
     "source": "Current Edge CUA/CDP page developer log from Tampermonkey userscript runtime",
@@ -21,7 +21,7 @@
     ],
     "pageQueryFallback": "native page query completed about every 15 seconds",
     "entryEventsObserved": 0,
-    "interpretation": "The current page remains usable and the script is active, but the runtime-start event identifies the loaded userscript as 0.8.44. Local 0.8.45 adds the independent read-only monitoring gate and OCR port preflight, so those changes are not yet in this browser runtime. GitHub Raw publication and browser update are still pending."
+    "interpretation": "The current page remains usable and the script is active, but the runtime-start event identifies the loaded userscript as 0.8.44. Local 0.8.46 repairs the proven protocol-login header/cookie mismatch and adds mocked coverage; browser loading and real arithmetic CAPTCHA login still require runtime confirmation."
   },
   "performance": {
     "localScanMs": 2000,
@@ -78,10 +78,14 @@
       "isOccupied"
     ],
     "skipLockedRecordsDefault": true,
-    "skipLockedRecordsConfigurable": true
+    "skipLockedRecordsConfigurable": true,
+    "directLoginAuthHeaders": true,
+    "directLoginCanonicalCookies": true,
+    "directLoginTokenStringGate": true,
+    "captchaArithmeticClientValidation": true
   },
   "nextActions": [
-    "在 Tampermonkey 中加载 0.8.45 并确认脚本版本",
+    "在 Tampermonkey 中加载 0.8.46 并确认脚本版本",
     "保持启用只读监控、关闭启用自动打开，用已审核用户观察 WebSocket/statusNum/rep-list 及自愈日志；确认不会调用 assertAllowEnter 或页面诊断按钮",
     "登录会话验证协议列表和 WebSocket 实时字段",
     "用有结论/无结论、不同检查项目和申请机构记录验证排序",
@@ -90,8 +94,8 @@
     "开发者模式下观察诊断锁释放记录，确认右侧列表持续刷新且无诊断医生姓名时允许下一位进入",
     "安装独立 OCR 运行环境并启动 127.0.0.1:18766，随后用算式验证码完成一次真实协议登录",
     "在 GitHub 创建公开仓库 kongji1/jiangxi-radiation-auto-diagnose（当前 GitHub MCP 没有创建仓库工具）",
-    "仓库创建后用 GitHub MCP 推送 0.8.45，并验证 Raw URL 返回 200；浏览器仍需能通过现有 Clash 路径访问 raw.githubusercontent.com",
-    "通过 Tampermonkey 正常更新流程加载 0.8.45，再用当前 Edge CUA/CDP 运行日志确认版本，禁止绕过 chrome-extension URL 策略"
+    "仓库创建后用 GitHub MCP 推送 0.8.46，并验证 Raw URL 返回 200；浏览器仍需能通过现有 Clash 路径访问 raw.githubusercontent.com",
+    "通过 Tampermonkey 正常更新流程加载 0.8.46，再用当前 Edge CUA/CDP 运行日志确认版本，禁止绕过 chrome-extension URL 策略"
   ],
   "projectRules": "AGENTS.md"
 }

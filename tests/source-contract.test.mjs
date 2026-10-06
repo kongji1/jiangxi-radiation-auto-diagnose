@@ -17,7 +17,7 @@ const hotUpdateGuide = fs.readFileSync(path.join(root, 'docs', 'GITHUB_HOT_UPDAT
 execFileSync(process.execPath, ['--check', sourcePath], { stdio: 'inherit' });
 
 const required = [
-  ['metadata version', /@version\s+0\.8\.45/],
+  ['metadata version', /@version\s+0\.8\.46/],
   ['read-only monitoring default', /monitoringEnabled\s*:\s*true/],
   ['read-only monitoring UI', /data-f="monitoringEnabled"/],
   ['read-only monitoring telemetry', /观察模式跳过自动打开/],
@@ -94,15 +94,18 @@ const required = [
   ['developer cleanup persistence', /const changed = pruneDeveloperEvents[\s\S]+persistDeveloperEvents/],
   ['developer mode upgrade migration', /developerModeDebugWindowVersion !== SCRIPT_VERSION/],
   ['direct login from radiation', /directLoginRoute = currentUrl\.pathname === '\/login' \|\| currentUrl\.pathname === '\/radiation'/],
-  ['captcha OCR bridge', /recognizeCaptcha\(capJson\.data\.img\)/],
-  ['captcha OCR fallback', /await recognizeCaptcha\(capJson\.data\.img\) \|\| await askCaptcha/],
-  ['direct login session probe', /sessionProbe = await fetch\('\/api\/admin\/user\/info'/],
+  ['captcha OCR bridge', /recognizeCaptcha\(image\)/],
+  ['captcha OCR fallback', /captchaResolver: async image => await recognizeCaptcha\(image\) \|\| await askCaptcha\(image\)/],
+  ['direct login session probe', /directLoginRequest\('\/api\/admin\/user\/info'/],
   ['case-insensitive auth cookie lookup', /function readCookie\(name\)[\s\S]+?toLowerCase\(\)[\s\S]+?item\.slice\(item\.indexOf\('\='\) \+ 1\)/],
-  ['direct login auth cookie guard', /if \(readCookie\('Auth'\)\) return false/],
-  ['probe before password prompt', /sessionProbe\.ok && sessionPayload\?\.code === 200 && sessionPayload\.data[\s\S]+?directPassword = window\.prompt/],
+  ['direct login auth cookie guard', /if \(readCookie\('Auth'\)\)[\s\S]+else if \(hasAuthenticatedAppShell\(\)/],
+  ['probe before password prompt', /sessionPayload\?\.code === 200 && sessionPayload\.data[\s\S]+?directPassword = window\.prompt/],
   ['active app shell login guard', /hasAuthenticatedAppShell\(\)[\s\S]+?跳过协议登录提示/],
   ['no password persistence', /directPassword = ''/],
   ['radiation route guard', /pathname !== '\/radiation'/],
+  ['direct login canonical cookies', /writeCookie\('AUTH', authToken\)[\s\S]+writeCookie\('LOGINCODE'/],
+  ['direct login token string gate', /typeof loginJson\?\.data === 'string'/],
+  ['captcha arithmetic normalization', /99-40[\s\S]+function normalizeCaptchaAnswer/],
   ['route cleanup', /stopRuntime\('route-exit'\)/],
   ['narrow header settings binding', /\.el-table__header-wrapper/]
 ];
@@ -212,7 +215,7 @@ if (disabledMonitoring.isMonitoringEnabled() || !disabledMonitoring.isAutoOpenEn
   throw new Error('source contract failed: monitoring disable unexpectedly changes auto-open gate');
 }
 
-if (state.version !== '0.8.45') throw new Error(`PROJECT_STATE version mismatch: ${state.version}`);
+if (state.version !== '0.8.46') throw new Error(`PROJECT_STATE version mismatch: ${state.version}`);
 if (state.performance?.realtimeListMinCooldownMs !== 500) throw new Error('PROJECT_STATE realtime cooldown mismatch');
 if (state.performance?.developerModeDefault !== true) throw new Error('PROJECT_STATE developer mode default mismatch');
 if (state.performance?.developerDebugRetentionMs !== 600000) throw new Error('PROJECT_STATE developer retention mismatch');
@@ -222,7 +225,7 @@ if (state.performance?.credentialValuesPersisted !== false) throw new Error('PRO
 if (state.performance?.cookieNameCaseInsensitive !== true) throw new Error('PROJECT_STATE cookie case-insensitive lookup mismatch');
 if (state.lastObservedRuntime?.statusProbe !== 'code=2002 repeated; auth headers absent in script context') throw new Error('PROJECT_STATE runtime evidence mismatch');
 if (state.lastObservedRuntime?.entryEventsObserved !== 0) throw new Error('PROJECT_STATE runtime entry evidence mismatch');
-if (!readme.includes('源码版本：`0.8.45`')) throw new Error('README version mismatch');
+if (!readme.includes('源码版本：`0.8.46`')) throw new Error('README version mismatch');
 if (!readme.includes('127.0.0.1:18766')) throw new Error('README OCR endpoint missing');
 if (!readme.includes('GPT6_MAINTENANCE.md')) throw new Error('README GPT-6 guide missing');
 if (!gpt6Guide.includes('dispatchDelayMs') || !gpt6Guide.includes('diagnosisActive')) throw new Error('GPT-6 maintenance guide incomplete');
@@ -231,6 +234,6 @@ if (!/git ls-remote/.test(publishTool) || !/git push origin/.test(publishTool) |
 if (!/node --check/.test(quickMaintenance) || !/lifecycle-diagnostics\.test\.mjs/.test(quickMaintenance) || !/release-failure\.test\.mjs/.test(quickMaintenance) || !/READY/.test(quickMaintenance)) throw new Error('GPT-6 quick maintenance tool incomplete');
 if (!/RequireClean/.test(quickMaintenance) || !/workingTree/.test(quickMaintenance)) throw new Error('GPT-6 quick maintenance dirty mode incomplete');
 if (!quickGuide.includes('五分钟') || !quickGuide.includes('配置门禁快照') || !quickGuide.includes('认证上下文')) throw new Error('GPT-6 quick maintenance guide incomplete');
-if (!hotUpdateGuide.includes('0.8.45') || hotUpdateGuide.includes('0.8.44')) throw new Error('GitHub hot-update guide has stale version evidence');
+if (!hotUpdateGuide.includes('0.8.46') || hotUpdateGuide.includes('0.8.45')) throw new Error('GitHub hot-update guide has stale version evidence');
 
 console.log(`source-contract: passed ${required.length} checks; version=${state.version}`);
