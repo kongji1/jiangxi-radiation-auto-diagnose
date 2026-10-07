@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         江西省县域医共体 - 自动诊断候选
 // @namespace    local.jiangxi.radiation
-// @version      0.8.54
+// @version      0.8.55
 // @updateURL   https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @downloadURL https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @description  以页面实时推送为主、轻量协议探测为兜底，按可配置规则识别后优先通过系统协议进入诊断；支持可控开发者诊断日志。
@@ -23,7 +23,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.8.54';
+  const SCRIPT_VERSION = '0.8.55';
 
   const AUTO_ENTRY_TIME_SLOTS = Object.freeze([
     { id: 'morning', label: '08:00–12:00', startMinutes: 8 * 60, endMinutes: 12 * 60, overnight: false },
@@ -227,6 +227,7 @@
   // WebSocket 提示可能先于列表请求完成；保存最近一条可识别线索，避免并发请求时丢失。
   let queuedRealtimeMatch = null;
   let queuedRealtimeHintAt = 0;
+  let queuedRealtimeReadyAt = 0;
   // 页面 Axios 还会发送登录用户 UID/USER-INFO；按需读取一次当前会话，值只留在内存中。
   let sessionIdentity = { info: null, uid: '', loading: false, lastAttemptAt: 0, loadedAt: 0 };
   let sessionIdentityRequest = null;
@@ -1996,6 +1997,142 @@
     }
   }
 
+  let protocolFinalEntryRepUid = '';
+
+  function protocolFinalEntryContext(repUid) {
+    try {
+      const page = pageWindow(), bridge = page.__JX_PROTOCOL_ENTRY_HANDOFF__;
+      const router = existingRadiationRouter(), identity = loginIdentity();
+      if (!router || !norm(identity.name) || !bridge?.ready || !bridge.isReady()) return null;
+      const root = page.document.getElementById('app');
+      const pinia = root?.__vue_app__?.config?.globalProperties?.$pinia ||
+        root?.__vueParentComponent?.appContext?.config?.globalProperties?.$pinia;
+      const nativeUser = pinia?._s?.get('user');
+      const nativeLoginCode = nativeUser?.userInfo?.logincode;
+      if (typeof nativeLoginCode !== 'string' || !nativeLoginCode || nativeLoginCode !== readCookie('LOGINCODE')) return null;
+      const station = nativeUser?.currentWorkStation ?? readCookie('WORKSTATION');
+      // Native Axios uses the Pinia station while sessionHeaders uses the
+      // cookie. Pre-acquire only when both identify the same native request.
+      if (typeof station !== 'string' || station !== readCookie('WORKSTATION')) return null;
+      const body = { repUid: String(repUid), isList: false, isRemote: false, flag: station === '105712' ? 1 : 0 };
+      const session = [readCookie('LOGINCODE'), readCookie('AUTH'), station].join('|');
+      return { bridge, router, body, session, href: page.location.href };
+    } catch (_) { return null; }
+  }
+
+  function stopAutoOpenAfterAcquisitionFailure(reason, uncertain = false) {
+    // A dispatched write may already own the report. Preserve it for manual
+    // recovery and stop acquiring another report until the outcome is clear.
+    config.enabled = false;
+    saveConfig();
+    refreshAutoEntryScheduleUI();
+    developerLog(uncertain ? '最终进入结果未知，自动打开暂停' : '已取得报告但页面交接失败，自动打开暂停', { reason, source: 'protocol-final-entry' }, { force: true });
+    try {
+      const page = pageWindow(), doc = page.document;
+      const notice = doc.createElement('div');
+      notice.textContent = uncertain ? '最终进入结果未确认；自动打开已暂停，请核对当前诊断任务后重新启用。' : '已取得报告，但页面交接未完成；自动打开已暂停，请手动打开当前报告后重新启用。';
+      notice.style.cssText = 'position:fixed;top:18px;left:50%;transform:translateX(-50%);z-index:2147483647;padding:12px 18px;background:#fdf6ec;color:#b36b00;border:1px solid #f3d19e;border-radius:6px';
+      doc.body?.appendChild(notice);
+      setTimeout(() => notice.remove(), 15000);
+    } catch (_) {}
+  }
+
+  async function acquireProtocolReport(d, entryData, repUid, url, context) {
+    const startedAt = Date.now(), requestId = 'final-' + startedAt + '-' + Math.random().toString(36).slice(2, 9);
+    let acquired = false, ticket = '';
+    if (!consumeAutomaticEntry(d, 'protocol-final-dispatched')) {
+      d.__entryBlocked = '无法持久保存最终进入记录';
+      return false;
+    }
+    // After the write is dispatched, uncertainty must never fall back to
+    // clicking or issue a second POST. The final service response is decisive.
+    d.__protocolFinalAttempted = true;
+    diagnosisActive = true;
+    beginFinalEntryPending(repUid, 'protocol');
+    finalEntryPending.entryKey = d.__automaticEntryKey;
+    finalEntryPending.entryToken = d.__automaticEntryToken;
+    persistFinalEntryPending();
+    protocolFinalEntryRepUid = String(repUid);
+    try {
+      const { response, payload, timing } = await fetchJson('/api/ct/rays/rep/enter', {
+        __requestId: requestId, __tokenRecoveryRetry: true,
+        method: 'POST', credentials: 'include', headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify(context.body)
+      }, 4500);
+      const data = payload?.data;
+      const validData = data && typeof data === 'object' && !Array.isArray(data);
+      const owner = norm(data?.reportDoc || data?.reportDoctor || data?.diagnosisDoctor);
+      const ownName = norm(loginIdentity().name);
+      const responseUid = String(data?.repUid || data?.reportUid || data?.reportId || '');
+      const status = norm(data?.reportStatusCode || data?.checkStatusCode);
+      const ownerMatches = !!owner && !!ownName && owner === ownName;
+      const lockedMessage = /锁定|占用|其他用户/.test(norm(payload?.message || payload?.msg));
+      const success = response.ok && payload?.code === 200 && validData && ownerMatches &&
+        (!responseUid || responseUid === String(repUid)) && (!status || status === '102502') && !lockedMessage;
+      developerLog(success ? '协议最终进入取得' : '协议最终进入拒绝', {
+        ...debugCandidate(entryData), requestId, ...timing, phase: 'protocol-acquire',
+        code: payload?.code ?? null, httpStatus: response.status, ownerMatches, serverMessage: norm(payload?.message || payload?.msg).slice(0, 240),
+        finalReportLoaded: false, durationMs: Date.now() - startedAt
+      }, { force: true });
+      if (!success) {
+        const knownRejected = response.ok && Number.isFinite(payload?.code) && payload.code !== 200;
+        if (lockedMessage) consumeAutomaticEntry(d, 'server-locked-other');
+        if (knownRejected && !lockedMessage) releaseAutomaticEntry(d, 'protocol-final-rejected');
+        d.__entryBlocked = lockedMessage ? '报告已被其他用户锁定，本报告不再自动尝试' :
+          validData && !ownerMatches ? '最终进入医生归属未确认' : '最终进入未确认，禁止重复请求';
+        finishFinalEntryPending('protocol-final-rejected', String(repUid), { finalReportLoaded: false });
+        if (!knownRejected && !lockedMessage) stopAutoOpenAfterAcquisitionFailure(d.__entryBlocked, true);
+        diagnosisActive = false;
+        return false;
+      }
+      acquired = true;
+      // A real successful lock cannot be undone by navigation cancellation,
+      // older response callbacks, log cleanup or returning to the list.
+      if (!consumeAutomaticEntry(d, 'protocol-final-acquired', true)) {
+        d.__entryBlocked = '最终进入已取得，持久确认失败';
+        stopAutoOpenAfterAcquisitionFailure(d.__entryBlocked);
+        return false;
+      }
+      const current = protocolFinalEntryContext(repUid);
+      if (!current || current.session !== context.session || pageWindow().location.href !== context.href || !isAutoOpenEnabled()) {
+        d.__entryBlocked = '最终进入后会话、页面或自动打开授权已变化';
+        finishFinalEntryPending('protocol-session-changed', String(repUid), { finalReportLoaded: false });
+        stopAutoOpenAfterAcquisitionFailure(d.__entryBlocked);
+        return false;
+      }
+      ticket = context.bridge.stage(context.body, JSON.stringify(payload), response.status, response.headers, 15000, response.statusText);
+      if (!ticket) {
+        d.__entryBlocked = '最终进入响应交接失败，禁止重复请求';
+        finishFinalEntryPending('protocol-handoff-failed', String(repUid), { finalReportLoaded: false });
+        stopAutoOpenAfterAcquisitionFailure(d.__entryBlocked);
+        return false;
+      }
+      const result = await context.router.push(url);
+      if (result && typeof result === 'object' && Number(result.type)) {
+        context.bridge.discard(ticket);
+        ticket = '';
+        d.__entryBlocked = '已取得报告，页面导航取消';
+        finishFinalEntryPending('protocol-navigation-cancelled', String(repUid), { finalReportLoaded: false });
+        stopAutoOpenAfterAcquisitionFailure(d.__entryBlocked);
+        return false;
+      }
+      developerLog('协议响应交接导航', { key: 'rep:' + repUid, recordId: String(repUid), requestId,
+        source: 'protocol-final-entry', phase: 'handoff-navigation', finalReportLoaded: false,
+        durationMs: Date.now() - startedAt }, { force: true });
+      return true;
+    } catch (error) {
+      if (ticket) context.bridge.discard(ticket);
+      d.__entryBlocked = '最终进入结果未知，禁止重复请求';
+      finishFinalEntryPending('protocol-final-uncertain', String(repUid), { finalReportLoaded: false });
+      stopAutoOpenAfterAcquisitionFailure(d.__entryBlocked, !acquired);
+      developerLog('协议最终进入异常', { ...debugCandidate(entryData), requestId, phase: 'protocol-acquire',
+        error: debugError(error), finalReportLoaded: false, durationMs: Date.now() - startedAt }, { force: true });
+      return false;
+    } finally {
+      protocolFinalEntryRepUid = '';
+    }
+  }
+
   async function protocolEnter(d) {
     if (!isAutoOpenEnabled()) {
       developerLog('观察模式跳过自动打开', { ...debugCandidate(d), source: 'protocol', reason: '自动打开已关闭' });
@@ -2104,6 +2241,10 @@
       const applyOrgCode = record?.applyOrgCode || record?.applyOrg || d?.row?.dataset?.applyOrgCode || '';
       const query = new URLSearchParams({ id: String(repUid) });
       if (applyOrgCode) query.set('applyOrgCode', String(applyOrgCode));
+      const finalContext = typeof protocolFinalEntryContext === 'function' ? protocolFinalEntryContext(repUid) : null;
+      if (finalContext) {
+        return await acquireProtocolReport(d, entryData, repUid, `/radiation/report?${query.toString()}`, finalContext);
+      }
       console.info('[自动诊断] 协议校验通过，打开诊断页', { hasReportId: true });
       developerLog('协议进入成功', { ...debugCandidate(entryData, { lifecycle: lifecycleDebug(lifecycle) }), requestId, ...timing, phase: 'assert-allowed', finalReportLoaded: false, durationMs: Date.now() - startedAt });
       // 直接使用业务路由，诊断页会按系统原流程继续获取并锁定记录。
@@ -2121,7 +2262,7 @@
       return navigated;
     } catch (e) {
       console.warn('[自动诊断] 协议进入失败，将尝试页面按钮', { error: String(e) });
-      releaseAutomaticEntry(d, 'protocol-exception');
+      if (!d.__protocolFinalAttempted) releaseAutomaticEntry(d, 'protocol-exception');
       if (finishFinalEntryPending('navigation-error', String(repUid), { error: debugError(e), finalReportLoaded: false })) diagnosisActive = false;
       developerLog('协议进入异常', { ...debugCandidate(entryData, { lifecycle: lifecycleDebug(lifecycle) }), error: debugError(e), durationMs: Date.now() - startedAt });
       return false;
@@ -2285,6 +2426,7 @@
   }
   function automaticEntryBlockReason(d) {
     const key = automaticEntryKey(d), entry = readAutomaticEntry(key);
+    if (entry?.state === 'consumed' && entry.reason === 'server-locked-other') return '本检查报告已被其他用户锁定，不再自动进入';
     if (entry?.state === 'consumed') return '本检查报告已进入过，不再自动进入';
     if (entry?.state === 'reserved' && entry.expiresAt > Date.now() && entry.token !== d?.__automaticEntryToken) return '本检查报告正在进入';
     return '';
@@ -2327,6 +2469,14 @@
       const at = Date.parse(event.at);
       if (!key || !Number.isFinite(at)) continue;
       const previous = readAutomaticEntry(key);
+      if (event.event === '报告进入拒绝' && event.endpointKind === 'radiation-entry' &&
+          event.requestMethod === 'POST' && /锁定|占用|其他用户/.test(norm(event.serverMessage)) &&
+          !(previous?.state === 'consumed' && previous.confirmed)) {
+        writeAutomaticEntry(key, { state: 'consumed', token: previous?.token || 'retained-server-lock',
+          startedAt: at, updatedAt: Math.max(at, Number(previous?.updatedAt || 0) + 1), expiresAt: 0,
+          confirmed: false, reason: 'server-locked-other' });
+        continue;
+      }
       if (event.event === '报告进入拒绝' && event.requestMethod === 'POST' &&
           previous?.reason === 'retained-entry-history' && !previous.confirmed && previous.updatedAt <= at) {
         writeAutomaticEntry(key, { ...previous, state: 'released', updatedAt: at, reason: 'retained-native-failure' });
@@ -2550,7 +2700,7 @@
     const cooldown = force ? 500 : normalCooldown;
     if (listRefreshRunning || now - lastListFetchAt < cooldown) {
       // 保留 WebSocket 携带的精确线索，待当前请求结束或冷却结束后再按该线索取列表。
-      if (match) queuedRealtimeMatch = match;
+      if (force || match) queueRealtimeRefresh({ match, hintAt: options.hintAt });
       developerLog('列表请求排队', { source: options.reason || 'list', reason: listRefreshRunning ? '已有请求进行中' : '冷却保护', waitMs: Math.max(0, cooldown - (now - lastListFetchAt)), narrow: !!match, candidateTag: debugTag(match), diagnosisActive, entryRunning });
       return false;
     }
@@ -2573,6 +2723,7 @@
       return await processRemoteRecords(records, { complete: !match && options.complete !== false });
     } finally {
       listRefreshRunning = false;
+      scheduleQueuedRealtimeRefresh();
     }
   }
   async function probeStatus() {
@@ -2629,32 +2780,68 @@
     }, Math.max(0, Number(delay) || 0));
   }
 
-  function queueRealtimeRefresh(options = {}) {
-    if (!isMonitoringEnabled() || config.entryMode === 'click' || !config.realtimeHints || !isMonitorRoute()) return;
-    if (!accountAllowed()) return;
-    if (options.match && typeof options.match === 'object') queuedRealtimeMatch = options.match;
-    if (options.hintAt) queuedRealtimeHintAt = Number(options.hintAt) || queuedRealtimeHintAt;
-    if (realtimeRefreshTimer) return;
-    // 同一条 WebSocket 线索只保留极短的合并窗口；正常情况下请求应在 1 秒内发出。
-    const minGap = 250;
-    const delay = Math.max(0, minGap - (Date.now() - lastRealtimeRefreshAt));
-    developerLog('实时列表调度', { source: 'websocket', delayMs: delay, narrow: !!options.match });
-    realtimeRefreshTimer = setTimeout(async () => {
+  function clearRealtimeRefreshQueue() {
+    if (realtimeRefreshTimer) clearTimeout(realtimeRefreshTimer);
+    realtimeRefreshTimer = null;
+    queuedRealtimeMatch = null;
+    queuedRealtimeHintAt = 0;
+    queuedRealtimeReadyAt = 0;
+  }
+
+  function scheduleQueuedRealtimeRefresh() {
+    if (!queuedRealtimeHintAt) return;
+    if (!isMonitoringEnabled() || config.entryMode === 'click' || !config.realtimeHints || !isMonitorRoute() || !accountAllowed()) {
+      clearRealtimeRefreshQueue();
+      return;
+    }
+    if (realtimeRefreshTimer) clearTimeout(realtimeRefreshTimer);
+    realtimeRefreshTimer = null;
+    // 请求进行中不轮询等待；其 finally 会唤醒已合并的线索。
+    if (listRefreshRunning) return;
+    const now = Date.now();
+    const delay = Math.max(0, queuedRealtimeReadyAt - now, 500 - (now - lastListFetchAt));
+    developerLog('实时列表调度', { source: 'websocket', delayMs: delay, narrow: !!queuedRealtimeMatch });
+    const scheduledTimer = setTimeout(async () => {
+      if (realtimeRefreshTimer !== scheduledTimer) return;
       realtimeRefreshTimer = null;
-      lastRealtimeRefreshAt = Date.now();
+      if (!queuedRealtimeHintAt) return;
+      if (!isMonitoringEnabled() || config.entryMode === 'click' || !config.realtimeHints || !isMonitorRoute() || !accountAllowed()) {
+        clearRealtimeRefreshQueue();
+        return;
+      }
+      if (listRefreshRunning || Date.now() < queuedRealtimeReadyAt || Date.now() - lastListFetchAt < 500) {
+        scheduleQueuedRealtimeRefresh();
+        return;
+      }
       const match = queuedRealtimeMatch;
-      queuedRealtimeMatch = null;
       const hintAt = queuedRealtimeHintAt;
-      queuedRealtimeHintAt = 0;
-      await refreshRemoteCandidates({ force: true, reason: 'websocket-hint', match, hintAt });
-      // 请求重叠或冷却保护时，refreshRemoteCandidates 会把线索放回队列；稍后重试，
-      // 既不丢实时事件，也不把列表接口变成高频轮询。
-      if (queuedRealtimeMatch) {
-        const pending = queuedRealtimeMatch;
-        queuedRealtimeMatch = null;
-        setTimeout(() => queueRealtimeRefresh({ match: pending, hintAt }), 500);
+      clearRealtimeRefreshQueue();
+      lastRealtimeRefreshAt = Date.now();
+      try {
+        await refreshRemoteCandidates({ force: true, reason: 'websocket-hint', match, hintAt });
+      } catch (e) {
+        // 已尝试的线索不因异常自动重试；只有新的推送才会再排队。
+        developerLog('实时列表刷新异常', { source: 'websocket', error: debugError(e), hintAt });
       }
     }, delay);
+    realtimeRefreshTimer = scheduledTimer;
+  }
+
+  function queueRealtimeRefresh(options = {}) {
+    if (!isMonitoringEnabled() || config.entryMode === 'click' || !config.realtimeHints || !isMonitorRoute() || !accountAllowed()) {
+      clearRealtimeRefreshQueue();
+      return;
+    }
+    if (options.match && typeof options.match === 'object') queuedRealtimeMatch = options.match;
+    if (!queuedRealtimeHintAt) {
+      const hintAt = Number(options.hintAt);
+      queuedRealtimeHintAt = Number.isFinite(hintAt) && hintAt > 0 ? hintAt : Date.now();
+      // 空闲首条提示立即调度；频繁提示沿用上次调度后的短合并窗口。
+      // 后续推送不会延长窗口或覆盖首次收到提示的时间。
+      const minGap = 250;
+      queuedRealtimeReadyAt = Math.max(Date.now(), lastRealtimeRefreshAt + minGap);
+    }
+    scheduleQueuedRealtimeRefresh();
   }
 
   async function processRealtimeHint(hint) {
@@ -2751,10 +2938,246 @@
     else developerLog('实时推送进入成功', { ...debugCandidate(d), source: 'websocket' });
   }
 
-  // 仅旁听报告页自己的最终进入请求；不发起请求、不复制请求头，也不改写响应。
-  // assertAllowEnter 通过只是允许打开，真正载入/锁定发生在原生 rep/enter。
+  // 校验通过后提前取得最终进入响应，报告页复用完整响应；同一报告只请求一次。
+  // 旁听仍区分提前取得与原生页面载入，只有最终业务响应成功才确认进入。
   const REPORT_ENTRY_EVENT = 'jx-auto-diagnose-report-entry-observed';
   let reportEntryBridgeBound = false;
+  function installProtocolEntryHandoff(page) {
+    const name = '__JX_PROTOCOL_ENTRY_HANDOFF__';
+    if (!page || page[name]) return page?.[name];
+    const endpoint = '/api/ct/rays/rep/enter';
+    const tickets = new Map(), requests = new WeakMap();
+    const prototype = page.XMLHttpRequest?.prototype;
+    const native = prototype && Object.fromEntries(['open', 'send', 'abort', 'setRequestHeader', 'getResponseHeader', 'getAllResponseHeaders'].map(key => [key, prototype[key]]));
+    const nativeFetch = page.fetch;
+    const properties = ['readyState', 'status', 'statusText', 'responseURL', 'response', 'responseText'];
+    let serial = 0, ready = false;
+    const cookie = name => {
+      try {
+        const item = String(page.document.cookie || '').split(';').map(value => value.trim()).find(value => value.slice(0, value.indexOf('=')).toLowerCase() === name);
+        return item ? decodeURIComponent(item.slice(item.indexOf('=') + 1)) : '';
+      } catch (_) { return ''; }
+    };
+    // The exact AUTH value is held only while the response is pending. The
+    // non-reversible tag lets spent tickets reject a replay after it is erased.
+    const tag = value => {
+      let a = 2166136261, b = 2246822507;
+      for (let i = 0; i < value.length; i++) { a = Math.imul(a ^ value.charCodeAt(i), 16777619); b = Math.imul(b ^ value.charCodeAt(i), 3266489909); }
+      return `${a >>> 0}:${b >>> 0}:${value.length}`;
+    };
+    const session = () => {
+      try {
+        const root = page.document.getElementById?.('app');
+        const pinia = root?.__vue_app__?.config?.globalProperties?.$pinia || root?.__vueParentComponent?.appContext?.config?.globalProperties?.$pinia;
+        const store = pinia?._s?.get?.('user');
+        const account = cookie('logincode'), auth = cookie('auth'), workstationCookie = cookie('workstation');
+        const workstation = store ? String(store.currentWorkStation || '') : workstationCookie;
+        if (!account || !auth || !workstation) return null;
+        return { account, auth, workstation, key: JSON.stringify([account, workstationCookie, workstation, tag(auth)]) };
+      } catch (_) { return null; }
+    };
+    const canonical = body => {
+      try {
+        const value = typeof body === 'string' && body.length <= 4096 ? JSON.parse(body) : body;
+        if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).sort().join(',') !== 'flag,isList,isRemote,repUid') return null;
+        if (typeof value.repUid !== 'string' || !value.repUid || value.repUid.length > 96 || /[/\\\u0000-\u0020\u007f]/.test(value.repUid) || typeof value.isRemote !== 'boolean' || value.isList !== false || ![0, 1].includes(value.flag)) return null;
+        return { repUid: value.repUid, key: JSON.stringify([value.repUid, value.isRemote, value.flag, value.isList]), flag: value.flag };
+      } catch (_) { return null; }
+    };
+    const target = (url, method) => {
+      try {
+        const value = new URL(typeof url === 'string' ? url : url?.url || '', page.location.href);
+        return String(method || 'GET').toUpperCase() === 'POST' && value.origin === page.location.origin && value.pathname === endpoint && !value.search && !value.hash ? value.href : '';
+      } catch (_) { return ''; }
+    };
+    const reportId = () => {
+      try { const url = new URL(page.location.href); return url.pathname === '/radiation/report' ? url.searchParams.get('id') || '' : ''; }
+      catch (_) { return ''; }
+    };
+    const erase = ticket => {
+      ticket.text = ''; ticket.auth = ''; ticket.headers = null;
+      if (ticket.timer) page.clearTimeout(ticket.timer);
+      ticket.timer = null;
+    };
+    const lookup = (body, requestHeaders = null) => {
+      const payload = canonical(body), identity = session();
+      if (!payload || !identity || reportId() !== payload.repUid) return null;
+      const ticket = tickets.get(`${identity.key}|${payload.key}`);
+      if (!ticket) return null;
+      if ((requestHeaders?.get('login-user-key') && requestHeaders.get('login-user-key') !== identity.account) ||
+          (requestHeaders?.get('authorization') && requestHeaders.get('authorization') !== identity.auth) ||
+          (requestHeaders?.get('workcode') && requestHeaders.get('workcode') !== identity.workstation)) {
+        // This exact report and session already sent its lock POST. Identity
+        // header differences cannot turn the staged response into a new POST.
+        ticket.state = 'identity-mismatch'; erase(ticket); return ticket;
+      }
+      if (ticket.state === 'pending' && (Date.now() >= ticket.expiresAt || ticket.auth !== identity.auth)) { ticket.state = 'expired'; erase(ticket); }
+      return ticket;
+    };
+    const consume = ticket => {
+      if (ticket.state !== 'pending') return null;
+      const value = { text: ticket.text, bytes: ticket.bytes, status: ticket.status, statusText: ticket.statusText, headers: ticket.headers, url: ticket.url };
+      ticket.state = 'consumed'; erase(ticket);
+      return value;
+    };
+    const restore = xhr => { for (const key of properties) { try { delete xhr[key]; } catch (_) {} } };
+    const event = (xhr, type, loaded = 0) => {
+      const value = type === 'readystatechange' ? new page.Event(type) : new page.ProgressEvent(type, { lengthComputable: true, loaded, total: loaded });
+      xhr.dispatchEvent(value);
+    };
+    const synthesize = (xhr, meta, response) => {
+      const state = { phase: 1, response, cancelled: false, failed: !response, timer: null, json: null };
+      if (response && xhr.responseType === 'json') { try { state.json = JSON.parse(response.text); } catch (_) {} }
+      meta.synthetic = state;
+      Object.defineProperties(xhr, {
+        readyState: { configurable: true, get: () => state.phase },
+        status: { configurable: true, get: () => !state.failed && state.phase >= 2 ? response.status : 0 },
+        statusText: { configurable: true, get: () => !state.failed && state.phase >= 2 ? response.statusText : '' },
+        responseURL: { configurable: true, get: () => !state.failed && state.phase >= 2 ? response.url : '' },
+        response: { configurable: true, get: () => xhr.responseType === 'json' ? state.phase === 4 && !state.failed ? state.json : null : state.phase >= 3 && !state.failed ? response.text : '' },
+        responseText: { configurable: true, get: () => {
+          if (xhr.responseType && xhr.responseType !== 'text') throw new page.DOMException('Response is not text', 'InvalidStateError');
+          return state.phase >= 3 && !state.failed ? response.text : '';
+        } }
+      });
+      state.timer = page.setTimeout(() => {
+        state.timer = null;
+        if (state.cancelled) return;
+        event(xhr, 'loadstart');
+        if (state.cancelled) return;
+        if (state.failed) { state.phase = 4; event(xhr, 'readystatechange'); if (!state.cancelled) event(xhr, 'error'); if (!state.cancelled) event(xhr, 'loadend'); return; }
+        for (const phase of [2, 3, 4]) {
+          state.phase = phase; event(xhr, 'readystatechange');
+          if (state.cancelled) return;
+          if (phase === 3) { event(xhr, 'progress', response.bytes); if (state.cancelled) return; }
+        }
+        event(xhr, 'load', response.bytes);
+        if (!state.cancelled) event(xhr, 'loadend', response.bytes);
+      }, 0);
+    };
+    const wrapped = {
+      open: function (method, url, async = true) {
+        const previous = requests.get(this)?.synthetic;
+        if (previous) { previous.cancelled = true; if (previous.timer) page.clearTimeout(previous.timer); restore(this); }
+        requests.delete(this);
+        const value = native.open.apply(this, arguments), endpointUrl = target(url, method);
+        if (endpointUrl) requests.set(this, { url: endpointUrl, async: async !== false, headers: new Map() });
+        return value;
+      },
+      setRequestHeader: function (key, value) {
+        const result = native.setRequestHeader.apply(this, arguments);
+        const meta = requests.get(this);
+        if (meta) {
+          const name = String(key).toLowerCase();
+          if (['authorization', 'login-user-key', 'workcode'].includes(name)) {
+            const previous = meta.headers.get(name); meta.headers.set(name, previous ? `${previous}, ${value}` : String(value));
+          }
+        }
+        return result;
+      },
+      send: function (body) {
+        const meta = requests.get(this);
+        if (!meta) return native.send.apply(this, arguments);
+        if (meta.synthetic) throw new page.DOMException('Request has already been sent', 'InvalidStateError');
+        const ticket = lookup(body, meta.headers);
+        // Request identity headers are needed only for this synchronous check.
+        meta.headers.clear();
+        if (!ticket) return native.send.apply(this, arguments);
+        // A ticket proves the POST already happened. Unsupported consumers and
+        // expired/spent tickets must fail locally, never repeat the lock POST.
+        const supported = meta.async && ['', 'text', 'json'].includes(this.responseType || '');
+        synthesize(this, meta, supported ? consume(ticket) : null);
+        return undefined;
+      },
+      abort: function () {
+        const state = requests.get(this)?.synthetic;
+        if (!state) return native.abort.apply(this, arguments);
+        const active = !state.cancelled && state.phase > 0 && state.phase < 4;
+        state.cancelled = true; state.failed = true; state.response = null; state.json = null;
+        if (state.timer) page.clearTimeout(state.timer);
+        if (active) { state.phase = 4; event(this, 'readystatechange'); event(this, 'abort'); event(this, 'loadend'); }
+        state.phase = 0;
+        return undefined;
+      },
+      getResponseHeader: function (key) {
+        const state = requests.get(this)?.synthetic;
+        return state ? !state.failed && state.phase >= 2 ? state.response.headers.get(String(key)) : null : native.getResponseHeader.apply(this, arguments);
+      },
+      getAllResponseHeaders: function () {
+        const state = requests.get(this)?.synthetic;
+        return state ? !state.failed && state.phase >= 2 ? Array.from(state.response.headers, ([key, value]) => `${key}: ${value}\r\n`).join('') : '' : native.getAllResponseHeaders.apply(this, arguments);
+      }
+    };
+    const deliverFetch = (ticket, signal) => {
+      if (signal?.aborted) return Promise.reject(new page.DOMException('Request aborted', 'AbortError'));
+      const value = consume(ticket);
+      if (!value) return Promise.reject(new TypeError('Entry handoff is no longer available'));
+      const response = new page.Response(value.text, { status: value.status, statusText: value.statusText, headers: value.headers });
+      Object.defineProperty(response, 'url', { configurable: true, value: value.url });
+      return Promise.resolve(response);
+    };
+    const wrappedFetch = function (input, options) {
+      if (!target(input, options?.method || input?.method) || options?.credentials === 'omit') return nativeFetch.apply(this, arguments);
+      const headers = new page.Headers(options?.headers || input?.headers || {});
+      const ticket = lookup(options?.body, headers);
+      if (ticket) return deliverFetch(ticket, options?.signal || input?.signal);
+      // Request bodies are asynchronous; only inspect them while a report
+      // ticket exists, and forward every nonmatching request unchanged.
+      if (options?.body === undefined && typeof input?.clone === 'function' && reportId() && tickets.size) {
+        const self = this, args = arguments;
+        return input.clone().text().then(body => {
+          const requestTicket = lookup(body, headers);
+          return requestTicket ? deliverFetch(requestTicket, options?.signal || input?.signal) : nativeFetch.apply(self, args);
+        });
+      }
+      return nativeFetch.apply(this, arguments);
+    };
+    try {
+      if (!native || Object.values(native).some(value => typeof value !== 'function') || typeof nativeFetch !== 'function' || !page.Response || !page.Headers || !page.Event || !page.ProgressEvent || !page.DOMException || !page.setTimeout || !page.clearTimeout) throw new Error('handoff-capability-unavailable');
+      const probe = new page.XMLHttpRequest();
+      native.open.call(probe, 'POST', new URL(endpoint, page.location.href).href, true);
+      if (typeof probe.dispatchEvent !== 'function' || typeof probe.addEventListener !== 'function') throw new Error('handoff-events-unavailable');
+      for (const type of ['', 'text', 'json']) { probe.responseType = type; if (probe.responseType !== type) throw new Error('handoff-response-type-unavailable'); }
+      let delivered = false;
+      probe.onloadend = () => { delivered = true; };
+      probe.dispatchEvent(new page.ProgressEvent('loadend'));
+      if (!delivered) throw new Error('handoff-loadend-unavailable');
+      probe.onloadend = null;
+      for (const key of properties) { Object.defineProperty(probe, key, { configurable: true, get: () => 0 }); if (probe[key] !== 0) throw new Error('handoff-property-unavailable'); }
+      restore(probe); native.abort.call(probe);
+      const response = new page.Response('{}', { status: 200 }); Object.defineProperty(response, 'url', { value: '' });
+      for (const key of Object.keys(wrapped)) { prototype[key] = wrapped[key]; if (prototype[key] !== wrapped[key]) throw new Error('handoff-hook-unavailable'); }
+      page.fetch = wrappedFetch; if (page.fetch !== wrappedFetch) throw new Error('handoff-fetch-unavailable');
+      ready = true;
+    } catch (_) {
+      if (native) for (const key of Object.keys(wrapped)) { try { if (prototype[key] === wrapped[key]) prototype[key] = native[key]; } catch (_) {} }
+      try { if (page.fetch === wrappedFetch) page.fetch = nativeFetch; } catch (_) {}
+    }
+    const bridge = {
+      ready,
+      isReady: (responseType = '') => ready && ['', 'text', 'json'].includes(responseType) && !!session(),
+      stage: (body, responseText, status = 200, headers = {}, ttl = 15000, statusText = '') => {
+        const payload = canonical(body), identity = session();
+        if (!ready || !payload || !identity || payload.flag !== (identity.workstation === '105712' ? 1 : 0) || typeof responseText !== 'string' || responseText.length > 1048576) return false;
+        const key = `${identity.key}|${payload.key}`;
+        if (tickets.has(key)) return false;
+        try {
+          const bytes = new TextEncoder().encode(responseText).byteLength;
+          if (bytes > 1048576) return false;
+          JSON.parse(responseText);
+          const responseHeaders = new page.Headers(typeof headers === 'string' ? headers.split(/\r?\n/).filter(Boolean).map(line => { const at = line.indexOf(':'); if (at <= 0) throw new Error('invalid-header'); return [line.slice(0, at), line.slice(at + 1).trim()]; }) : headers);
+          const response = new page.Response(responseText, { status: Number(status), statusText: String(statusText || ''), headers: responseHeaders });
+          const ticket = { id: `entry-handoff:${Date.now()}:${++serial}`, key, auth: identity.auth, text: responseText, bytes, status: response.status, statusText: response.statusText || (response.status === 200 ? 'OK' : ''), headers: responseHeaders, url: new URL(endpoint, page.location.href).href, state: 'pending', expiresAt: Date.now() + Math.max(1, Math.min(15000, Number(ttl) || 15000)), timer: null };
+          ticket.timer = page.setTimeout(() => { if (ticket.state === 'pending') ticket.state = 'expired'; erase(ticket); }, ticket.expiresAt - Date.now());
+          tickets.set(key, ticket); return ticket.id;
+        } catch (_) { return false; }
+      },
+      discard: id => { const ticket = Array.from(tickets.values()).find(value => value.id === id); if (!ticket) return false; ticket.state = 'discarded'; erase(ticket); return true; },
+      peek: id => { const ticket = Array.from(tickets.values()).find(value => value.id === id); return ticket ? { id: ticket.id, expiresAt: ticket.expiresAt, pending: ticket.state === 'pending' && Date.now() < ticket.expiresAt } : null; }
+    };
+    page[name] = Object.freeze(bridge);
+    return page[name];
+  }
   function installReportEntryPageObserver(page, eventName, maxBytes = 1048576) {
     if (!page || page.__JX_AUTO_DIAGNOSE_REPORT_ENTRY_BRIDGE__) return;
     const cap = Math.max(1, Math.min(1048576, Number(maxBytes) || 1048576));
@@ -2965,6 +3388,13 @@
       responseDataShape: bounded(detail.responseDataShape, 20), finalReportLoaded: detail.outcome === 'complete' && matchesCurrentReport
     };
     const label = endpointKind === 'report-detail' ? '报告详情读取' : '报告进入';
+    // Clone parsing may finish after the acquisition flag has cleared. Use
+    // the captured request route instead of timing to distinguish pre-acquire.
+    if (endpointKind === 'radiation-entry' && record.requestMethod === 'POST' &&
+        (detail.route !== '/radiation/report' || bounded(detail.routeReportId, 96) !== repUid)) {
+      developerLog('提前协议进入响应旁听', { ...record, phase: 'protocol-acquire-observed', finalReportLoaded: false });
+      return;
+    }
     const name = `${label}${detail.outcome === 'complete' ? '完成' : detail.outcome === 'rejected' ? '拒绝' : '异常'}`;
     developerLog(name, record, { force: true });
     if (endpointKind === 'radiation-entry' && record.requestMethod === 'POST' && repUid) {
@@ -2975,10 +3405,16 @@
       const ownerMatches = !!currentAccountName && !!record.reportDoctor && accountValueMatches(currentAccountName, norm(record.reportDoctor));
       const explicitOwnerMismatch = !!currentAccountName && !!record.reportDoctor && !ownerMatches;
       const enteredData = { key: `rep:${repUid}`, __automaticEntryKey: pending?.entryKey || `rep:${repUid}`, __automaticEntryToken: pending?.entryToken || '' };
-      if (detail.outcome === 'complete' && matchesCurrentReport && !explicitOwnerMismatch && (automaticAttempt || ownerMatches)) {
+      const acquisition = readAutomaticEntry(`rep:${repUid}`);
+      const handoffFailed = automaticAttempt && acquisition?.confirmed === true && acquisition.reason === 'protocol-final-acquired' &&
+        (detail.outcome !== 'complete' || !matchesCurrentReport || explicitOwnerMismatch);
+      if (handoffFailed) {
+        stopAutoOpenAfterAcquisitionFailure('已取得报告，原生页面载入未完成');
+      } else if (detail.outcome === 'complete' && matchesCurrentReport && !explicitOwnerMismatch && (automaticAttempt || ownerMatches)) {
         consumeAutomaticEntry(enteredData, automaticAttempt ? 'automatic-native-complete' : 'manual-native-complete', true);
       } else if (automaticAttempt && detail.outcome === 'rejected') {
-        releaseAutomaticEntry(enteredData, `native-${detail.outcome}`);
+        if (/锁定|占用|其他用户/.test(record.serverMessage)) consumeAutomaticEntry(enteredData, 'server-locked-other');
+        else releaseAutomaticEntry(enteredData, `native-${detail.outcome}`);
       }
     }
     if (endpointKind === 'radiation-entry' && detail.outcome === 'complete' && matchesCurrentReport && record.reportDoctor) {
@@ -3001,7 +3437,7 @@
       if (!root) return false;
       try {
         const script = document.createElement('script');
-        script.textContent = `(${installReportEntryPageObserver.toString()})(window,${JSON.stringify(REPORT_ENTRY_EVENT)})`;
+        script.textContent = `(${installProtocolEntryHandoff.toString()})(window);(${installReportEntryPageObserver.toString()})(window,${JSON.stringify(REPORT_ENTRY_EVENT)})`;
         root.appendChild(script); script.remove();
         return true;
       } catch (_) { return false; }

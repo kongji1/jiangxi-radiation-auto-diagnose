@@ -72,30 +72,49 @@ def main():
           const entryStates = [...keys].map(id => stored['jx-radiation-auto-entry-once-v1:' + encodeURIComponent('rep:' + id)]).filter(Boolean).map(decode);
           const automaticEntrySummary = { recordsFound: entryStates.length,
             consumed: entryStates.filter(e => e?.state === 'consumed').length,
+            otherOwnerBlocked: entryStates.filter(e => e?.state === 'consumed' && e.reason === 'server-locked-other').length,
             confirmed: entryStates.filter(e => e?.state === 'consumed' && e.confirmed === true).length,
             reserved: entryStates.filter(e => e?.state === 'reserved' && e.expiresAt > Date.now()).length };
           const related = events.filter(e => matched.includes(e) || identities(e).some(id => keys.has(id)) || tags.has(e.tag) || tags.has(e.candidateTag) || requestIds.has(e.requestId));
           const fields = ['at', 'event', 'source', 'reason', 'failedRules', 'status', 'statusCode',
             'locked', 'code', 'httpStatus', 'protocolAllowed', 'durationMs', 'dispatchDelayMs',
             'waitMs', 'version', 'diagnoseEntryFound', 'diagnoseEntryDisabled', 'stage', 'phase',
-            'finalReportLoaded', 'reportIdMatches', 'error', 'errorClass', 'responseDataShape', 'serverMessage', 'endpointKind', 'reportDoctor', 'ownershipMatches', 'navigationMode', 'requestId', 'networkStartedAt', 'hintToNetworkMs', 'identityWaitMs', 'clientIpWaitMs', 'preparationMs', 'networkDurationMs', 'withinOneSecond', 'networkSent'];
+            'finalReportLoaded', 'reportIdMatches', 'error', 'errorClass', 'responseDataShape', 'serverMessage', 'endpointKind', 'reportDoctor', 'ownershipMatches', 'ownerMatches', 'navigationMode', 'requestId', 'networkStartedAt', 'hintToNetworkMs', 'identityWaitMs', 'clientIpWaitMs', 'preparationMs', 'networkDurationMs', 'withinOneSecond', 'networkSent'];
           const pick = e => Object.fromEntries(fields.filter(k => k in e).map(k => [k, e[k]]));
           const seen = new Set();
           const timeline = related.filter(e => {
             const signature = JSON.stringify([e.event, e.reason, e.statusCode, e.code, e.failedRules]);
-            if (/协议进入|报告进入|报告详情读取|首次|状态变化|占用|进入取消|进入成功|进入失败/.test(e.event)) return true;
+            if (/协议进入|协议最终进入|协议响应交接|报告进入|报告详情读取|首次|状态变化|占用|进入取消|进入成功|进入失败/.test(e.event)) return true;
             if (seen.has(signature)) return false;
             seen.add(signature); return true;
           });
           const from = events[0]?.at, to = events.at(-1)?.at;
+          const hint = related.find(e => e.event === '实时推送收到');
+          const eligible = related.find(e => e.event === '候选命中');
+          const allowed = related.find(e => e.event === '协议进入成功' && e.phase === 'assert-allowed');
+          const nativeFinal = related.find(e => /^报告进入(完成|拒绝|异常)$/.test(e.event));
+          const acquired = related.find(e => /^协议最终进入(取得|拒绝|异常)$/.test(e.event));
+          const final = nativeFinal || acquired;
+          const elapsed = (start, end) => start && end ? Date.parse(end.at) - Date.parse(start.at) : null;
+          const nativeStartedAt = nativeFinal ? Date.parse(nativeFinal.at) - Number(nativeFinal.durationMs || 0) : null;
+          const latencySummary = { timeZone: 'Asia/Taipei', hintToEligibleMs: elapsed(hint, eligible),
+            hintToFinalResponseMs: elapsed(hint, final), assertionAllowedToNativeRequestMs:
+              allowed && nativeStartedAt != null ? nativeStartedAt - Date.parse(allowed.at) : null,
+            nativeRequestDurationMs: nativeFinal?.durationMs ?? null,
+            hintToAcquisitionResponseMs: elapsed(hint, acquired),
+            assertionAllowedToAcquisitionRequestMs: allowed && Number.isFinite(acquired?.networkStartedAt) ? acquired.networkStartedAt - Date.parse(allowed.at) : null,
+            acquisitionRequestDurationMs: acquired?.networkDurationMs ?? null,
+            acquisitionEvent: acquired?.event || '',
+            finalReportLoaded: final?.finalReportLoaded ?? false, finalEvent: final?.event || '' };
           return { count: events.length, journalCount: journalKeys.length, retentionMinutes, retentionMs, from, to,
             retainedSpanSeconds: from && to ? Math.round((Date.parse(to)-Date.parse(from))/1000) : 0,
-            automaticEntrySummary, targetEventCount: related.length, timeline: timeline.map(pick),
+            automaticEntrySummary, latencySummary, targetEventCount: related.length, timeline: timeline.map(pick),
             recentRequestTimings: events.filter(e => e.event === '协议网络请求发起' || e.event === '协议响应认证上下文').slice(-20).map(pick),
-            recentEntryAndRouteEvents: events.filter(e => /协议进入|报告进入|报告详情读取|路由变化|运行版本|时段到期/.test(e.event)).map(pick),
+            recentEntryAndRouteEvents: events.filter(e => /协议进入|协议最终进入|协议响应交接|报告进入|报告详情读取|路由变化|运行版本|时段到期/.test(e.event)).map(pick),
             settings: { enabled: config.enabled, monitoringEnabled: config.monitoringEnabled,
               developerMode: config.developerMode, developerRetentionMinutes: retentionMinutes, entryMode: config.entryMode,
               entryDelaySeconds: config.entryDelaySeconds, humanizeEntryLevel: config.humanizeEntryLevel,
+              examNamesExcluded: config.examNamesExcluded || [],
               autoEntrySchedule: config.autoEntrySchedule } };
         })(""" + json.dumps(args.uuid) + "," + json.dumps(args.name) + ")"
         result = cdp.evaluate(session, expression)

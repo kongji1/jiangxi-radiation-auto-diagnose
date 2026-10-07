@@ -38,6 +38,12 @@ try {
   if ($LASTEXITCODE -ne 0) { throw 'Report record resolution tests failed' }
   node .\tests\exam-exclusions.test.mjs
   if ($LASTEXITCODE -ne 0) { throw 'Exam exclusion tests failed' }
+  node .\tests\realtime-queue.test.mjs
+  if ($LASTEXITCODE -ne 0) { throw 'Realtime queue tests failed' }
+  node .\tests\protocol-entry-handoff.test.mjs
+  if ($LASTEXITCODE -ne 0) { throw 'Protocol entry handoff tests failed' }
+  node .\tests\protocol-final-entry.test.mjs
+  if ($LASTEXITCODE -ne 0) { throw 'Protocol final entry tests failed' }
   node .\tests\direct-login.test.mjs
   if ($LASTEXITCODE -ne 0) { throw 'Direct login tests failed' }
   node .\tests\lifecycle-diagnostics.test.mjs

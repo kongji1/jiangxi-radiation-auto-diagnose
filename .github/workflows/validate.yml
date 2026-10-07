@@ -34,6 +34,9 @@ jobs:
       - run: node tests/automatic-entry-once.test.mjs
       - run: node tests/report-record-resolution.test.mjs
       - run: node tests/exam-exclusions.test.mjs
+      - run: node tests/realtime-queue.test.mjs
+      - run: node tests/protocol-entry-handoff.test.mjs
+      - run: node tests/protocol-final-entry.test.mjs
       - run: node tests/direct-login.test.mjs
       - run: node tests/lifecycle-diagnostics.test.mjs
       - run: node tests/release-failure.test.mjs
