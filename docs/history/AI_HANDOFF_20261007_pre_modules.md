@@ -223,7 +223,3 @@
 - With “启用自动打开” off and “启用只读监控” on, matching candidates are logged with “观察模式跳过自动打开” and no `assertAllowEnter` or page diagnose click is attempted. This is the safe mode for testing against an already audited/open report.
 - Settings and self-check expose both states. Existing persisted `enabled` values remain the automatic-opening preference; new configurations default to read-only monitoring enabled.
 - Static tests now require the 0.8.45 metadata/state/README version, the monitoring default and UI, the no-entry telemetry, and an explicit automatic-opening gate. Browser loading and GitHub Raw publication still require independent runtime evidence.
-
-
-
-
