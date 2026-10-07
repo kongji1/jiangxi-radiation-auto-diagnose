@@ -1,2 +1,5 @@
 .captcha-ocr-venv/
 tools/__pycache__/
+.runtime-maintenance/
+__pycache__/
+*.pyc

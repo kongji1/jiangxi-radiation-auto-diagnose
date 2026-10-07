@@ -6,13 +6,13 @@ Tampermonkey 会读取用户脚本头部的 `@updateURL` 和 `@downloadURL`。�
 
 ## 当前状态
 
-本地项目已有 Git 仓库；发布必须绑定到用户明确指定的远程仓库，不能擅自推送到未知地址。真实仓库地址确定后，再把下面两行加入脚本元数据：
+2026-10-07 已重新确认：`kongji1/jiangxi-radiation-auto-diagnose` 为现有公开仓库，默认分支 `main`，当前连接有推送权限。本地 `origin` 指向该仓库，接管基线 `master` 与 `origin/main` 同为 `6eeefd8`。发布必须绑定这个已确认的远程，不能推送到未知地址。
 
-当前配置目标 `kongji1/jiangxi-radiation-auto-diagnose` 仍返回 GitHub 404，且已连接的 GitHub MCP 没有创建仓库接口；因此 Raw 热更新地址已经写入源码，但在仓库真正创建并推送前不会宣称热更新已生效。
+旧记录中的“仓库 404／需要创建仓库”已失效。仓库存在不等于新版本已发布；每次交付仍需分别确认远端提交、Raw 内容、Actions 和当前页面运行版本。
 
 ```text
-// @updateURL   https://raw.githubusercontent.com/<owner>/<repo>/main/jiangxi-radiation-auto-diagnose.user.js
-// @downloadURL https://raw.githubusercontent.com/<owner>/<repo>/main/jiangxi-radiation-auto-diagnose.user.js
+// @updateURL   https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
+// @downloadURL https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 ```
 
 不要把 `@updateURL` 指向会生成 HTML 的 GitHub 页面地址，必须使用 `raw.githubusercontent.com` 的原始文件地址。
@@ -29,13 +29,13 @@ powershell -ExecutionPolicy Bypass -File tools/verify-release.ps1
 
 OCR 默认端口为 `18766`。启动脚本会先检查端口归属；若检测到其它本地服务占用，使用 `-Port 18767` 等空闲端口启动，并在设置界面同步修改 OCR 地址。
 
-仓库创建并完成 Git 认证后，使用下面的发布脚本：
+完成验证、提交并确认 Git 认证后，可使用下面的发布脚本：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools/publish-github.ps1 -Repository kongji1/jiangxi-radiation-auto-diagnose
 ```
 
-脚本会先执行完整发布检查，再验证远端仓库、推送当前提交，并读取 Raw 文件确认版本为当前源码版本 `0.8.46`。仓库不存在或 Raw 仍返回 404 时会直接失败。
+脚本会先执行完整发布检查，再验证远端仓库、推送当前提交，并读取 Raw 文件确认版本为当前源码版本 `0.8.54`。仓库不存在或 Raw 仍返回 404 时会直接失败。
 
 在项目根目录运行：
 
@@ -44,7 +44,7 @@ node --check jiangxi-radiation-auto-diagnose.user.js
 node tests/source-contract.test.mjs
 ```
 
-GitHub Actions 会在每次 push 和 pull request 上执行语法、源码契约、发布失败保护和验证码测试。只有检查通过的提交才应作为 Tampermonkey 更新源。
+GitHub Actions 在 Linux 和 Windows 上执行全部 JavaScript 测试、验证码和运行版本核验测试。Windows 还实际执行 PowerShell 失败注入；Linux 不把这一平台特定测试的跳过当作 Windows 验证通过。只有检查通过的提交才应作为更新源。
 
 ## 发布约定
 

@@ -1,0 +1,13 @@
+Hidden Target CDP Tampermonkey method verified 2026-10-06.
+
+1) Browser websocket: http://127.0.0.1:9333/json/version -> browser WS.
+2) Target.createTarget {url:'about:blank', hidden:true}; then Target.attachToTarget {targetId, flatten:true}; Page.navigate session to chrome-extension://iikmkjmpaadaobahmlepeloendndfphd/options.html#nav=settings.
+3) In target Runtime.evaluate awaitPromise: chrome.runtime.sendMessage({...}); extension page sender is recognized as extpage and options origin. Read-only loadTree worked and returned current enabled script uuid 23e8f7dc-df23-419c-bf55-2dce8ade789b and version 0.8.48.
+4) Save API (from Tampermonkey extension.js/background.js): payload {method:'saveScript', uuid:'23e8...', code:<full userscript>, reload:false or true, auto_save:true/false, new_script:false, lastModTime?}. Options page wrapper sets origin:'options'; direct chrome.runtime.sendMessage from hidden options page also worked (negative read-only test missing uuid returned {error:'uuid missing'}), proving endpoint reachable. Set reload:true after save to re-register userscript; if reload:false then call browser page Page.reload separately. `auto_save:true` suppresses UI and avoids editor lifecycle.
+5) Verify with read-only sendMessage loadTree; then close hidden target via Target.closeTarget. Hidden target is absent from /json/list and does not leave visible extension:// tab. Use try/finally close.
+6) Do not use Target.createTarget directly with extension URL+hidden (it may start about:blank); create hidden about:blank then Page.navigate. Avoid CUA/options editor entirely.
+7) Existing visible options tabs from prior workflow can be closed by target ID, but this method leaves none. Runtime reload itself is protocol-level and sub-second after hidden target setup.
+
+Relevant source evidence: extension.js W() sends {method:'saveScript', code, uuid, reload, auto_save,...}; background.js saveScript handler requires uuid and calls sl.doSave; `loadTree` returns full script metadata/code. Current /json/list had only radiation, Screenage, offscreen/service worker after closing test targets.
+
+8) Project-local launcher: run Update-Tampermonkey-Radiation.cmd in this directory. It calls update_tampermonkey_radiation_cdp.py beside itself, so the project no longer depends on the old shared scripts directory.

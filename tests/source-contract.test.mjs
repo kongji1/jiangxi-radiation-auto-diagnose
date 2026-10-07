@@ -5,6 +5,11 @@ import { execFileSync } from 'node:child_process';
 const root = path.resolve(import.meta.dirname, '..');
 const sourcePath = path.join(root, 'jiangxi-radiation-auto-diagnose.user.js');
 const source = fs.readFileSync(sourcePath, 'utf8');
+const metadataVersion = source.match(/^\/\/\s*@version\s+(\d+\.\d+\.\d+)\s*$/m)?.[1];
+const runtimeVersion = source.match(/const SCRIPT_VERSION\s*=\s*['"]([^'"]+)['"]/)?.[1];
+if (!metadataVersion || runtimeVersion !== metadataVersion) {
+  throw new Error(`source contract failed: metadata/runtime version mismatch (${metadataVersion ?? 'missing'} / ${runtimeVersion ?? 'missing'})`);
+}
 const readme = fs.readFileSync(path.join(root, 'README.md'), 'utf8');
 const gpt6Guide = fs.readFileSync(path.join(root, 'docs', 'GPT6_MAINTENANCE.md'), 'utf8');
 const updateTool = fs.readFileSync(path.join(root, 'tools', 'configure-github-hot-update.ps1'), 'utf8');
@@ -17,7 +22,7 @@ const hotUpdateGuide = fs.readFileSync(path.join(root, 'docs', 'GITHUB_HOT_UPDAT
 execFileSync(process.execPath, ['--check', sourcePath], { stdio: 'inherit' });
 
 const required = [
-  ['metadata version', /@version\s+0\.8\.46/],
+  ['metadata version', /^\/\/\s*@version\s+\d+\.\d+\.\d+\s*$/m],
   ['read-only monitoring default', /monitoringEnabled\s*:\s*true/],
   ['read-only monitoring UI', /data-f="monitoringEnabled"/],
   ['read-only monitoring telemetry', /观察模式跳过自动打开/],
@@ -61,9 +66,16 @@ const required = [
   ['organization scope helper', /function currentCheckOrgId/],
   ['incomplete realtime exact-name fallback', /实时线索窄列表为空，退回精确查询/],
   ['candidate patient-name normalization', /function candidatePatientName/],
-  ['locked-record realtime hard gate', /shouldSkipLocked\(entryData\) \|\| \(!isPendingReport\(entryData\)/],
+  ['locked-record realtime hard gate', /if \(!isPendingReport\(entryData\)\)/],
   ['age-unlimited setting', /ageUnlimited/],
   ['exam weights', /examWeights/],
+  ['durable per report entry key', /AUTOMATIC_ENTRY_PREFIX = 'jx-radiation-auto-entry-once-v1:'/],
+  ['stable entry UID after enrichment', /d\.record = record/],
+  ['entry history restored on boot', /restoreAutomaticEntryHistory\(\);/],
+  ['exam exclusions configuration', /examNamesExcluded: \[\]/],
+  ['exam exclusions hard filter', /function isExcludedExam\(d\)/],
+  ['custom exam exclusion UI', /data-a="addExamExclusion"/],
+  ['exam exclusions telemetry', /examExcludedCount: \(config\.examNamesExcluded/],
   ['institution weights', /institutionWeights/],
   ['body-part filter', /bodyParts/],
   ['hospital filter', /checkHospitals/],
@@ -84,7 +96,10 @@ const required = [
   ['unlimited sentinel migration', /Older builds could persist[\s\S]+empty-array representation/],
   ['runtime filter snapshot', /配置门禁快照/],
   ['runtime selected filter snapshot', /encounterTypes:\s*\[\.\.\.\(config\.encounterTypes[\s\S]+modalities:\s*\[\.\.\.\(config\.modalities/],
-  ['developer rolling retention', /DEBUG_RETENTION_MS = 10 \* 60 \* 1000/],
+  ['developer rolling retention', /developerRetentionMinutes: 60/],
+  ['developer configurable retention', /function developerRetentionMs\(\)/],
+  ['developer retention custom UI', /data-f="developerRetentionMinutes"/],
+  ['developer protected journal generation', /DEBUG_JOURNAL_PREFIX = 'jx-radiation-auto-diagnose-debug-journal-v3:'/],
   ['full candidate debug fields', /applicationNo: d\?\.applicationNo[\s\S]+patient: d\?\.patient/],
   ['full record debug snapshot', /record: d\?\.record \|\| null/],
   ['credential presence diagnostics', /debugCredentialShape[\s\S]+authCookie[\s\S]+authorizationHeader/],
@@ -92,7 +107,7 @@ const required = [
   ['developer event pruning', /pruneDeveloperEvents/],
   ['developer periodic cleanup', /DEBUG_CLEANUP_INTERVAL_MS = 60 \* 1000/],
   ['developer cleanup persistence', /const changed = pruneDeveloperEvents[\s\S]+persistDeveloperEvents/],
-  ['developer mode upgrade migration', /developerModeDebugWindowVersion !== SCRIPT_VERSION/],
+  ['developer mode stable schema migration', /Number\(parsed\.developerModeDebugWindowSchema \|\| 0\) < 2/],
   ['direct login from radiation', /directLoginRoute = currentUrl\.pathname === '\/login' \|\| currentUrl\.pathname === '\/radiation'/],
   ['captcha OCR bridge', /recognizeCaptcha\(image\)/],
   ['captcha OCR fallback', /captchaResolver: async image => await recognizeCaptcha\(image\) \|\| await askCaptcha\(image\)/],
@@ -162,10 +177,8 @@ if (!/已有客户处于诊断中，仅继续观察列表/.test(source) || !/仅
 if (/password\s*[:=]\s*['"][^'"]+['"]/.test(source)) {
   throw new Error('source contract failed: possible plaintext password literal');
 }
-// Exercise the lock policy in isolation so the setting cannot silently become
-// a label-only option. The default skips an explicitly locked pending record,
-// while disabling the option still leaves the strict pending-status gate in
-// place; a diagnosing record remains blocked in either mode.
+// The legacy setting is kept for saved config compatibility, but a locked
+// report is an unconditional hard gate in every saved configuration.
 const lockStart = source.indexOf('  function lockedRecordDetected');
 const lockEnd = source.indexOf('  function matchFailureReasons', lockStart);
 if (lockStart < 0 || lockEnd < 0) throw new Error('source contract failed: lock policy functions missing');
@@ -181,8 +194,8 @@ const unlockedPolicy = new Function('norm', 'recordLockState', 'config', `${sour
   record => !!record?.isLock,
   { skipLockedRecords: false }
 );
-if (unlockedPolicy.shouldSkipLocked({ statusCode: '102501', locked: true })) throw new Error('source contract failed: disabled lock skip still active');
-if (!unlockedPolicy.isPendingReport({ statusCode: '102501', locked: true })) throw new Error('source contract failed: disabled lock skip does not reach pending gate');
+if (!unlockedPolicy.shouldSkipLocked({ statusCode: '102501', locked: true })) throw new Error('source contract failed: legacy config bypasses lock gate');
+if (unlockedPolicy.isPendingReport({ statusCode: '102501', locked: true })) throw new Error('source contract failed: locked report reached pending gate');
 if (unlockedPolicy.isPendingReport({ statusCode: '102502', locked: true })) throw new Error('source contract failed: diagnosing status bypassed');
 if (!/raw\.githubusercontent\.com/.test(updateTool)) throw new Error('GitHub update tool missing raw URL');
 const hotUpdateHelper = fs.readFileSync(path.join(root, 'tools', 'configure-github-hot-update.mjs'), 'utf8');
@@ -206,26 +219,32 @@ const state = JSON.parse(fs.readFileSync(path.join(root, 'PROJECT_STATE.json'), 
 const gateStart = source.indexOf('  function isMonitoringEnabled');
 const gateEnd = source.indexOf('\n  function clickDiagnose', gateStart);
 if (gateStart < 0 || gateEnd < 0) throw new Error('source contract failed: independent runtime gates missing');
-const gates = new Function('config', `${source.slice(gateStart, gateEnd)}; return { isMonitoringEnabled, isAutoOpenEnabled };`)({ monitoringEnabled: true, enabled: false });
+const createUnrestrictedGates = config => new Function(
+  'config', 'autoEntryScheduleState', 'clearExpiredAutoEntrySchedule',
+  `${source.slice(gateStart, gateEnd)}; return { isMonitoringEnabled, isAutoOpenEnabled };`
+)(config, () => ({ configured: false, active: true, expired: false, requiresSelection: false }), () => {
+  throw new Error('source contract failed: unrestricted schedule unexpectedly expired');
+});
+const gates = createUnrestrictedGates({ monitoringEnabled: true, enabled: false });
 if (!gates.isMonitoringEnabled() || gates.isAutoOpenEnabled()) {
   throw new Error('source contract failed: monitoring/auto-open gates are not independent');
 }
-const disabledMonitoring = new Function('config', `${source.slice(gateStart, gateEnd)}; return { isMonitoringEnabled, isAutoOpenEnabled };`)({ monitoringEnabled: false, enabled: true });
+const disabledMonitoring = createUnrestrictedGates({ monitoringEnabled: false, enabled: true });
 if (disabledMonitoring.isMonitoringEnabled() || !disabledMonitoring.isAutoOpenEnabled()) {
   throw new Error('source contract failed: monitoring disable unexpectedly changes auto-open gate');
 }
 
-if (state.version !== '0.8.46') throw new Error(`PROJECT_STATE version mismatch: ${state.version}`);
+if (state.version !== metadataVersion) throw new Error(`PROJECT_STATE version mismatch: ${state.version} / ${metadataVersion}`);
 if (state.performance?.realtimeListMinCooldownMs !== 500) throw new Error('PROJECT_STATE realtime cooldown mismatch');
 if (state.performance?.developerModeDefault !== true) throw new Error('PROJECT_STATE developer mode default mismatch');
-if (state.performance?.developerDebugRetentionMs !== 600000) throw new Error('PROJECT_STATE developer retention mismatch');
+if (state.performance?.developerDebugRetentionMs !== 3600000) throw new Error('PROJECT_STATE developer retention mismatch');
 if (state.performance?.developerDebugFullCandidateFields !== true) throw new Error('PROJECT_STATE full debug fields mismatch');
 if (state.performance?.credentialShapeDiagnostics !== true) throw new Error('PROJECT_STATE credential diagnostics mismatch');
 if (state.performance?.credentialValuesPersisted !== false) throw new Error('PROJECT_STATE credential persistence boundary mismatch');
 if (state.performance?.cookieNameCaseInsensitive !== true) throw new Error('PROJECT_STATE cookie case-insensitive lookup mismatch');
 if (state.lastObservedRuntime?.statusProbe !== 'code=2002 repeated; auth headers absent in script context') throw new Error('PROJECT_STATE runtime evidence mismatch');
 if (state.lastObservedRuntime?.entryEventsObserved !== 0) throw new Error('PROJECT_STATE runtime entry evidence mismatch');
-if (!readme.includes('源码版本：`0.8.46`')) throw new Error('README version mismatch');
+if (!readme.includes(`源码版本：\`${metadataVersion}\``)) throw new Error('README version mismatch');
 if (!readme.includes('127.0.0.1:18766')) throw new Error('README OCR endpoint missing');
 if (!readme.includes('GPT6_MAINTENANCE.md')) throw new Error('README GPT-6 guide missing');
 if (!gpt6Guide.includes('dispatchDelayMs') || !gpt6Guide.includes('diagnosisActive')) throw new Error('GPT-6 maintenance guide incomplete');
@@ -234,6 +253,8 @@ if (!/git ls-remote/.test(publishTool) || !/git push origin/.test(publishTool) |
 if (!/node --check/.test(quickMaintenance) || !/lifecycle-diagnostics\.test\.mjs/.test(quickMaintenance) || !/release-failure\.test\.mjs/.test(quickMaintenance) || !/READY/.test(quickMaintenance)) throw new Error('GPT-6 quick maintenance tool incomplete');
 if (!/RequireClean/.test(quickMaintenance) || !/workingTree/.test(quickMaintenance)) throw new Error('GPT-6 quick maintenance dirty mode incomplete');
 if (!quickGuide.includes('五分钟') || !quickGuide.includes('配置门禁快照') || !quickGuide.includes('认证上下文')) throw new Error('GPT-6 quick maintenance guide incomplete');
-if (!hotUpdateGuide.includes('0.8.46') || hotUpdateGuide.includes('0.8.45')) throw new Error('GitHub hot-update guide has stale version evidence');
+if (!hotUpdateGuide.includes(`当前源码版本 \`${metadataVersion}\``) || !/raw\.githubusercontent\.com\/[^\s]+\/main\/jiangxi-radiation-auto-diagnose\.user\.js/.test(hotUpdateGuide)) {
+  throw new Error('GitHub hot-update guide must identify the current source version and main-branch Raw file');
+}
 
 console.log(`source-contract: passed ${required.length} checks; version=${state.version}`);

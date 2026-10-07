@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         江西省县域医共体 - 自动诊断候选
 // @namespace    local.jiangxi.radiation
-// @version      0.8.46
+// @version      0.8.54
 // @updateURL   https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @downloadURL https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @description  以页面实时推送为主、轻量协议探测为兜底，按可配置规则识别后优先通过系统协议进入诊断；支持可控开发者诊断日志。
@@ -11,6 +11,9 @@
 // @grant        GM_registerMenuCommand
 // @grant        GM_getValue
 // @grant        GM_setValue
+// @grant        GM_listValues
+// @grant        GM_deleteValue
+// @grant        GM_addValueChangeListener
 // @grant        GM_xmlhttpRequest
 // @connect      127.0.0.1
 // @connect      raw.githubusercontent.com
@@ -20,7 +23,101 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.8.46';
+  const SCRIPT_VERSION = '0.8.54';
+
+  const AUTO_ENTRY_TIME_SLOTS = Object.freeze([
+    { id: 'morning', label: '08:00–12:00', startMinutes: 8 * 60, endMinutes: 12 * 60, overnight: false },
+    { id: 'noon', label: '12:00–14:30', startMinutes: 12 * 60, endMinutes: 14 * 60 + 30, overnight: false },
+    { id: 'afternoon', label: '14:30–17:30', startMinutes: 14 * 60 + 30, endMinutes: 17 * 60 + 30, overnight: false },
+    { id: 'night', label: '17:30–次日 08:00', startMinutes: 17 * 60 + 30, endMinutes: 8 * 60, overnight: true }
+  ]);
+
+  function localDateKey(date = new Date()) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  function localDateFromKey(value) {
+    const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) return null;
+    const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+    return Number.isNaN(date.getTime()) || localDateKey(date) !== value ? null : date;
+  }
+
+  function autoEntrySlot(id) {
+    return AUTO_ENTRY_TIME_SLOTS.find(slot => slot.id === String(id || '')) || null;
+  }
+
+  function autoEntryScheduleState(now = new Date(), schedule = config?.autoEntrySchedule || {}) {
+    const slot = autoEntrySlot(schedule.slot);
+    const anchorDate = localDateFromKey(schedule.date);
+    if (!slot || !anchorDate) return { configured: false, requiresSelection: !!(schedule.requiresSelection || schedule.slot || schedule.date), active: false, pending: false, expired: false, slot: null, startAt: 0, endAt: 0 };
+    const start = new Date(anchorDate);
+    start.setHours(Math.floor(slot.startMinutes / 60), slot.startMinutes % 60, 0, 0);
+    const end = new Date(anchorDate);
+    if (slot.overnight) end.setDate(end.getDate() + 1);
+    end.setHours(Math.floor(slot.endMinutes / 60), slot.endMinutes % 60, 0, 0);
+    const nowAt = now.getTime();
+    const startAt = start.getTime();
+    const endAt = end.getTime();
+    const expired = nowAt >= endAt;
+    const pending = nowAt < startAt;
+    return { configured: true, requiresSelection: false, active: !expired && !pending, pending, expired, slot, date: schedule.date, startAt, endAt };
+  }
+
+  function clearExpiredAutoEntrySchedule(state) {
+    if (!state?.configured || !state.expired) return false;
+    const oldSlot = state.slot?.label || String(config.autoEntrySchedule?.slot || '');
+    config.autoEntrySchedule = { slot: '', date: '', requiresSelection: true };
+    config.enabled = false;
+    saveConfig();
+    developerLog('自动进入时段到期关闭', { source: 'auto-entry-schedule', slot: oldSlot, date: state.date || '' }, { force: true });
+    refreshAutoEntryScheduleUI();
+    return true;
+  }
+
+  function setAutoEntrySchedule(slotId, now = new Date()) {
+    const slot = autoEntrySlot(slotId);
+    if (!slot) return false;
+    // 在跨午夜时段的次日凌晨选择时，将时段归属到前一天，保证 08:00 到点自动失效。
+    let anchor = new Date(now);
+    const minute = now.getHours() * 60 + now.getMinutes();
+    if (slot.overnight && minute < slot.endMinutes) {
+      anchor.setDate(anchor.getDate() - 1);
+    }
+    const schedule = { slot: slot.id, date: localDateKey(anchor), requiresSelection: false };
+    if (autoEntryScheduleState(now, schedule).expired) return false;
+    config.autoEntrySchedule = schedule;
+    config.enabled = true;
+    return true;
+  }
+
+  function autoEntryScheduleText(state = autoEntryScheduleState()) {
+    if (state.requiresSelection) return '自动进入已关闭，请重新选择一个时间段；选择后立即保存并开启。';
+    if (!state.configured) return '未选择时段：沿用“启用自动打开”开关，不限制时间。';
+    if (state.expired) return `时段已到期：${state.slot.label}，自动打开已关闭，请重新选择。`;
+    if (state.pending) {
+      const start = new Date(state.startAt);
+      return `已选择 ${state.slot.label}，将在 ${start.toLocaleString([], { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })} 开始。`;
+    }
+    const end = new Date(state.endAt);
+    return `当前时段生效：${state.slot.label}，到 ${end.toLocaleString([], { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })} 自动关闭。`;
+  }
+
+  function refreshAutoEntryScheduleUI() {
+    const box = document.getElementById('jx-auto-diagnose-panel');
+    if (!box) return;
+    const state = autoEntryScheduleState();
+    const enabled = box.querySelector('[data-f="enabled"]');
+    if (enabled) { enabled.checked = !!config.enabled; enabled.disabled = state.requiresSelection; }
+    box.querySelectorAll('[data-f="autoEntryTimeSlot"]').forEach(input => {
+      input.checked = input.value === (config.autoEntrySchedule?.slot || '');
+    });
+    const text = box.querySelector('[data-a="autoEntryTimeState"]');
+    if (text) text.textContent = autoEntryScheduleText(state);
+  }
 
   // 所有业务规则和页面定位都集中在这里，也可以从表头设置弹窗进入配置面板修改。
   const DEFAULT_CONFIG = {
@@ -28,9 +125,10 @@
     enabled: true,
     // 只读监控与自动打开分离。关闭自动打开时仍可观察 WebSocket、协议列表、状态和开发者日志。
     monitoringEnabled: true,
-    // 默认开启完整诊断记录；仅保留最近 10 分钟，关闭后按用户选择持久化。
+    // 默认开启完整诊断记录；保留时长可配置，关闭后按用户选择持久化。
     developerMode: true,
-    developerModeDebugWindowVersion: '0.8.46',
+    developerRetentionMinutes: 60,
+    developerModeDebugWindowSchema: 2,
     // [] 表示不限登录账号；填写账号编号或登录名后，仅对匹配账号启用自动诊断。
     allowedAccounts: [],
     // 协议登录只保存账号，不保存密码；密码仅在当前页面会话内存中使用。
@@ -44,11 +142,16 @@
     // 后台候选处理默认只走协议，不替用户点击页面“查询”；需要同步可见表格时再手动开启。
     pageQueryRefresh: true,
     clickDelayMs: 700,
+    // 自动进入前的可配置等待；0 秒且模拟人工程度为“无”时立即响应。
+    entryDelaySeconds: 0,
+    humanizeEntryLevel: 0,
+    // 可选的当日自动进入时段；未选择时沿用 enabled 的不限时兼容行为。
+    // 选择后只在该时段内允许自动进入，跨午夜时段以选择日 17:30 为起点。
+    autoEntrySchedule: { slot: '', date: '', requiresSelection: false },
     // 待诊断在当前系统中的状态值；脚本会优先点击这个复选框，再读取表格。
     pendingStatusValue: '102501',
     reportStatuses: ['待诊断'],
-    // 默认跳过已经被其它用户锁定/占用的记录；关闭后仍会先经过待诊断状态门禁，
-    // 再尝试协议校验，最终是否允许进入由服务器决定。
+    // 兼容旧配置字段；其它用户已锁定/占用的报告始终禁止自动进入。
     skipLockedRecords: true,
     imageStatuses: [],
     encounterTypes: ['门诊', '急诊'], // [] 表示不限；住院不会被默认放行
@@ -78,6 +181,8 @@
       '颈椎椎间盘平扫'
     ],
     examNamesExtra: [],
+    // 排除先于允许项目；每个拆分检查项目按规范化后的完整名称匹配。
+    examNamesExcluded: [],
     // 动态收集当前列表中出现过的检查项目，供设置界面勾选。
     examNamesCatalog: [],
     // “更新所有可选项目”会把其它动态表头的选项也缓存到这里，避免翻页后选项消失。
@@ -130,6 +235,8 @@
   // 业务前端会从 WebRTC ICE 候选中附带客户端地址；缺少该头时只读接口会返回 TOKEN_FAIL(2002)。
   let clientIp = '';
   let clientIpRequest = null;
+  let clientIpRetryAfter = 0;
+  let clientIpRefreshInBackground = false;
   let tokenRecoveryLastAt = 0;
   let tokenFailureLoggedAt = 0;
   let pageQueryRunning = false;
@@ -138,67 +245,277 @@
   let autoQueryFallbackTimer = null;
   // 页面本身只有点击“查询”才会重新取表格；用低频单次定时器代替人工点击。
   let pageQueryHeartbeatTimer = null;
+  let autoEntryScheduleTimer = null;
   let visibilityBound = false;
   let headerObserver = null;
   let routeWatchTimer = null;
+  let loginRecoveryTimer = null;
   let lastObservedPath = '';
   let accountGateState = '';
   const seen = new Map();
   // 开发者诊断用的候选生命周期索引。它只保留内存中的短期关联，不参与
-  // 进入决策，也不写入独立存储；详细事件仍由 developerLog 按十分钟窗口落盘。
+  // 进入决策，也不写入独立存储；详细事件按用户选择的保留窗口落盘。
   const candidateLifecycle = new Map();
   let candidateSnapshotSequence = 0;
   const REALTIME_HINT_EVENT = '__jx_auto_diagnose_ws_hint_v1';
-  const DEBUG_EVENT_LIMIT = 240;
-  const DEBUG_RETENTION_MS = 10 * 60 * 1000;
   const DEBUG_CLEANUP_INTERVAL_MS = 60 * 1000;
+  const DEBUG_PERSIST_INTERVAL_MS = 1000;
   const DEBUG_EVENT_THROTTLE_MS = 3000;
   const DEBUG_STORAGE_KEY = 'jx-radiation-auto-diagnose-debug-v1';
+  // A separate namespace prevents a still-open old page's fixed ten-minute
+  // cleanup from deleting records retained by the new configurable window.
+  const DEBUG_JOURNAL_PREFIX = 'jx-radiation-auto-diagnose-debug-journal-v3:';
+  const DEBUG_LEGACY_JOURNAL_PREFIX = 'jx-radiation-auto-diagnose-debug-journal-v2:';
+  const DEBUG_RESET_KEY = 'jx-radiation-auto-diagnose-debug-reset-v2';
+  const debugWriterId = `${Date.now().toString(36)}-${typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2)}`;
+  const debugJournalKey = DEBUG_JOURNAL_PREFIX + debugWriterId;
+  const debugJournalSignatures = new Map();
   const debugEvents = [];
+  const debugWriterEvents = [];
   const debugLastAt = new Map();
+  let debugEventSequence = 0;
+  let debugResetMarker = { at: 0, token: '' };
   let debugCleanupTimer = null;
+  let debugPersistTimer = null;
+  let developerRetentionConfigurationSavedAt = Number(config.configurationSavedAt || 0);
 
+  function developerRetentionMs() {
+    return normalizeDeveloperRetentionMinutes(config.developerRetentionMinutes) * 60000;
+  }
+  function developerRetentionLabel() {
+    const minutes = normalizeDeveloperRetentionMinutes(config.developerRetentionMinutes);
+    return minutes % 1440 === 0 ? `${minutes / 1440}天` : minutes % 60 === 0 ? `${minutes / 60}小时` : `${minutes}分钟`;
+  }
+  function synchronizeDeveloperRetention(raw = null) {
+    const values = [decodeDeveloperStorage(raw)];
+    try { values.push(decodeDeveloperStorage(GM_getValue(STORAGE_KEY, null))); } catch (_) {}
+    try { values.push(decodeDeveloperStorage(developerLocalStorage()?.getItem(STORAGE_KEY + ':durable-v1'))); } catch (_) {}
+    // Old pages may save an older whole config without this field. Such a save
+    // must not undo a retention duration selected in the newer document.
+    const latest = values.filter(value => value && typeof value === 'object' && !Array.isArray(value) && Object.prototype.hasOwnProperty.call(value, 'developerRetentionMinutes'))
+      .sort((a, b) => Number(b.configurationSavedAt || 0) - Number(a.configurationSavedAt || 0))[0];
+    if (!latest || Number(latest.configurationSavedAt || 0) < developerRetentionConfigurationSavedAt) return false;
+    const next = normalizeDeveloperRetentionMinutes(latest.developerRetentionMinutes);
+    const changed = config.developerRetentionMinutes !== next;
+    config.developerRetentionMinutes = next;
+    developerRetentionConfigurationSavedAt = Number(latest.configurationSavedAt || 0);
+    config.configurationSavedAt = Math.max(Number(config.configurationSavedAt || 0), developerRetentionConfigurationSavedAt);
+    return changed;
+  }
+
+  function decodeDeveloperStorage(raw) {
+    try { return typeof raw === 'string' ? JSON.parse(raw) : raw; } catch (_) { return null; }
+  }
+  function developerLocalStorage() {
+    try { return typeof localStorage !== 'undefined' ? localStorage : null; } catch (_) { return null; }
+  }
+  function readDeveloperReset() {
+    const markers = [debugResetMarker];
+    try { markers.push(decodeDeveloperStorage(GM_getValue(DEBUG_RESET_KEY, null))); } catch (_) {}
+    try { markers.push(decodeDeveloperStorage(developerLocalStorage()?.getItem(DEBUG_RESET_KEY))); } catch (_) {}
+    debugResetMarker = markers.filter(value => value && Number.isFinite(Number(value.at))).sort((a, b) => Number(b.at) - Number(a.at) || String(b.token || '').localeCompare(String(a.token || '')))[0] || { at: 0, token: '' };
+    return debugResetMarker;
+  }
+  function developerEventId(event) {
+    if (event.eventId) return String(event.eventId);
+    // Older arrays have no IDs. Stable content identity prevents duplicate migration reads.
+    const text = JSON.stringify(event);
+    let hash = 2166136261;
+    for (let i = 0; i < text.length; i++) hash = Math.imul(hash ^ text.charCodeAt(i), 16777619);
+    return `legacy:${event.at || ''}:${text.length}:${(hash >>> 0).toString(36)}`;
+  }
+  function retainedDeveloperEvents(events, now = Date.now()) {
+    const cutoff = now - developerRetentionMs();
+    return (Array.isArray(events) ? events : []).filter(event => {
+      const at = Date.parse(event?.at || '');
+      return Number.isFinite(at) && at >= cutoff && (at > Number(debugResetMarker.at) || (at === Number(debugResetMarker.at) && event.debugResetId === debugResetMarker.token));
+    });
+  }
+  function developerJournalKeys() {
+    const keys = new Set();
+    try { if (typeof GM_listValues === 'function') for (const key of GM_listValues()) if (key.startsWith(DEBUG_JOURNAL_PREFIX) || key.startsWith(DEBUG_LEGACY_JOURNAL_PREFIX)) keys.add(key); } catch (_) {}
+    try {
+      const storage = developerLocalStorage();
+      for (let i = 0; storage && i < storage.length; i++) { const key = storage.key(i); if (key?.startsWith(DEBUG_JOURNAL_PREFIX) || key?.startsWith(DEBUG_LEGACY_JOURNAL_PREFIX)) keys.add(key); }
+    } catch (_) {}
+    return [...keys];
+  }
+  function sealLegacyDeveloperEvents(events) {
+    const buckets = new Map();
+    for (const event of events) {
+      const bucketStart = Math.floor(Date.parse(event.at) / 60000) * 60000;
+      if (!buckets.has(bucketStart)) buckets.set(bucketStart, new Map());
+      const eventId = developerEventId(event);
+      buckets.get(bucketStart).set(eventId, { ...event, eventId });
+    }
+    for (const [bucketStart, items] of buckets) {
+      const snapshot = [...items.values()].sort((a, b) => a.eventId.localeCompare(b.eventId));
+      const text = JSON.stringify(snapshot);
+      let first = 2166136261, second = 3339675911;
+      for (let i = 0; i < text.length; i++) {
+        first = Math.imul(first ^ text.charCodeAt(i), 16777619);
+        second = Math.imul(second ^ text.charCodeAt(i), 2246822519);
+      }
+      const writerId = `legacy-${text.length.toString(36)}-${(first >>> 0).toString(36)}-${(second >>> 0).toString(36)}`;
+      const key = `${DEBUG_JOURNAL_PREFIX}${writerId}:${bucketStart}`;
+      const journal = { schema: 2, writerId, bucketStart, events: snapshot };
+      // Seal only legacy records not already present in an immutable snapshot.
+      // The old script may overwrite its array later; this key remains independent.
+      try { if (!developerLocalStorage()?.getItem(key)) developerLocalStorage()?.setItem(key, JSON.stringify(journal)); } catch (_) {}
+      try { if (!GM_getValue(key, null)) GM_setValue(key, journal); } catch (_) {}
+    }
+  }
+  function collectDeveloperEvents(cleanup = false) {
+    readDeveloperReset();
+    const all = [...debugEvents, ...debugWriterEvents];
+    let legacyToSeal = [];
+    const journalIds = new Set();
+    try {
+      const legacy = decodeDeveloperStorage(GM_getValue(DEBUG_STORAGE_KEY, []));
+      if (Array.isArray(legacy)) {
+        const retained = retainedDeveloperEvents(legacy);
+        legacyToSeal = retained;
+        for (const event of retained) all.push(event);
+        // Read legacy data for compatibility, then remove only expired entries.
+        if (cleanup && retained.length !== legacy.length) GM_setValue(DEBUG_STORAGE_KEY, retained);
+      }
+    } catch (_) {}
+    for (const key of developerJournalKeys()) {
+      const legacyJournal = key.startsWith(DEBUG_LEGACY_JOURNAL_PREFIX);
+      const bucketStart = Number(key.slice(key.lastIndexOf(':') + 1));
+      if (cleanup && Number.isFinite(bucketStart) && bucketStart + 60000 <= Date.now() - developerRetentionMs()) {
+        try { if (typeof GM_deleteValue === 'function') GM_deleteValue(key); } catch (_) {}
+        try { developerLocalStorage()?.removeItem(key); } catch (_) {}
+        debugJournalSignatures.delete(key);
+        continue;
+      }
+      const copies = [];
+      try { copies.push(decodeDeveloperStorage(GM_getValue(key, null))); } catch (_) {}
+      try { copies.push(decodeDeveloperStorage(developerLocalStorage()?.getItem(key))); } catch (_) {}
+      const events = copies.flatMap(copy => Array.isArray(copy?.events) ? copy.events : []);
+      const retained = retainedDeveloperEvents(events);
+      for (const event of retained) all.push(event);
+      if (legacyJournal) for (const event of retained) legacyToSeal.push(event);
+      else for (const event of retained) journalIds.add(developerEventId(event));
+      if (cleanup && !retained.length) {
+        try { if (typeof GM_deleteValue === 'function') GM_deleteValue(key); } catch (_) {}
+        try { developerLocalStorage()?.removeItem(key); } catch (_) {}
+        debugJournalSignatures.delete(key);
+      }
+    }
+    sealLegacyDeveloperEvents(legacyToSeal.filter(event => !journalIds.has(developerEventId(event))));
+    const unique = new Map();
+    for (const event of retainedDeveloperEvents(all)) {
+      const eventId = developerEventId(event);
+      if (!unique.has(eventId)) unique.set(eventId, { ...event, eventId });
+    }
+    debugEvents.length = 0;
+    for (const event of [...unique.values()].sort((a, b) => Date.parse(a.at) - Date.parse(b.at))) debugEvents.push(event);
+    const own = retainedDeveloperEvents(debugWriterEvents);
+    debugWriterEvents.length = 0;
+    for (const event of own) debugWriterEvents.push(event);
+  }
   function persistDeveloperEvents() {
-    try { GM_setValue(DEBUG_STORAGE_KEY, debugEvents); } catch (_) {}
+    if (debugPersistTimer) clearTimeout(debugPersistTimer);
+    debugPersistTimer = null;
+    // Writes only touch this document's events; aggregation is done on load,
+    // minute cleanup or explicit read, rather than scanning an hour every second.
+    synchronizeDeveloperRetention();
+    pruneDeveloperEvents();
+    const buckets = new Map();
+    for (const event of debugWriterEvents) {
+      const bucketStart = Math.floor(Date.parse(event.at) / 60000) * 60000;
+      if (!buckets.has(bucketStart)) buckets.set(bucketStart, []);
+      buckets.get(bucketStart).push(event);
+    }
+    // Each document owns its minute keys. Closed writers can be cleaned by deleting
+    // expired buckets without rewriting an active writer's newer observations.
+    for (const [bucketStart, events] of buckets) {
+      const key = `${debugJournalKey}:${bucketStart}`;
+      const signature = events.map(event => event.eventId).join('|');
+      if (debugJournalSignatures.get(key) === signature) continue;
+      const journal = { schema: 2, writerId: debugWriterId, bucketStart, events };
+      try { developerLocalStorage()?.setItem(key, JSON.stringify(journal)); } catch (_) {}
+      try { GM_setValue(key, journal); } catch (_) {}
+      debugJournalSignatures.set(key, signature);
+    }
+  }
+  function scheduleDeveloperPersistence(immediate = false) {
+    if (immediate) { persistDeveloperEvents(); return; }
+    if (debugPersistTimer) return;
+    debugPersistTimer = setTimeout(persistDeveloperEvents, DEBUG_PERSIST_INTERVAL_MS);
+  }
+  function flushDeveloperEvents() {
+    if (debugPersistTimer) persistDeveloperEvents();
+  }
+  function isCriticalDeveloperEvent(event, options = {}) {
+    return !!options.force || /协议进入|进入(?:成功|失败|异常)|路由变化|运行版本|运行时(?:停止|重启)|异常|拒绝|失败|候选被其他用户占用|自动进入时段到期关闭/.test(event);
   }
   function scheduleDeveloperCleanup() {
     if (debugCleanupTimer) return;
     debugCleanupTimer = setInterval(() => {
-      if (!config.developerMode) return;
+      synchronizeDeveloperRetention();
       const changed = pruneDeveloperEvents(Date.now());
-      if (changed) persistDeveloperEvents();
+      if (changed || debugPersistTimer) persistDeveloperEvents();
+      collectDeveloperEvents(true);
+      if (typeof pruneCandidateLifecycle === 'function') pruneCandidateLifecycle();
+      refreshDeveloperRetentionUI();
     }, DEBUG_CLEANUP_INTERVAL_MS);
   }
 
   function loadDeveloperEvents() {
-    if (!config.developerMode) return;
+    collectDeveloperEvents(true);
     try {
-      const raw = GM_getValue(DEBUG_STORAGE_KEY, []);
-      const events = typeof raw === 'string' ? JSON.parse(raw) : raw;
-      if (Array.isArray(events)) debugEvents.push(...events.slice(-DEBUG_EVENT_LIMIT));
-      const changed = pruneDeveloperEvents();
-      if (changed) persistDeveloperEvents();
+      if (typeof GM_addValueChangeListener === 'function') GM_addValueChangeListener(DEBUG_RESET_KEY, (_key, _oldValue, newValue) => {
+        const marker = decodeDeveloperStorage(newValue);
+        if (marker && Number(marker.at) >= Number(debugResetMarker.at)) debugResetMarker = marker;
+        readDeveloperReset(); pruneDeveloperEvents(); debugLastAt.clear();
+      });
+      if (typeof GM_addValueChangeListener === 'function') GM_addValueChangeListener(STORAGE_KEY, (_key, _oldValue, newValue) => {
+        if (!synchronizeDeveloperRetention(newValue)) return;
+        pruneDeveloperEvents(); persistDeveloperEvents(); collectDeveloperEvents(true);
+        if (typeof pruneCandidateLifecycle === 'function') pruneCandidateLifecycle();
+        refreshDeveloperRetentionUI();
+      });
     } catch (_) {}
     scheduleDeveloperCleanup();
+  }
+  function clearDeveloperEvents() {
+    debugResetMarker = { at: Date.now(), token: `${debugWriterId}:clear:${++debugEventSequence}` };
+    try { developerLocalStorage()?.setItem(DEBUG_RESET_KEY, JSON.stringify(debugResetMarker)); } catch (_) {}
+    try { GM_setValue(DEBUG_RESET_KEY, debugResetMarker); GM_setValue(DEBUG_STORAGE_KEY, []); } catch (_) {}
+    debugEvents.length = 0;
+    debugWriterEvents.length = 0;
+    debugJournalSignatures.clear();
+    debugLastAt.clear();
+    collectDeveloperEvents(true);
+    persistDeveloperEvents();
   }
   loadDeveloperEvents();
 
   function loadConfig() {
     try {
-      const saved = GM_getValue(STORAGE_KEY, null);
+      let saved = GM_getValue(STORAGE_KEY, null);
+      // Same-origin mirror survives a reload before Tampermonkey transports its write.
+      try {
+        const mirror = JSON.parse(developerLocalStorage()?.getItem(STORAGE_KEY + ':durable-v1') || 'null');
+        const current = typeof saved === 'string' ? JSON.parse(saved) : saved;
+        if (mirror && Number(mirror.configurationSavedAt || 0) > Number(current?.configurationSavedAt || 0)) saved = mirror;
+      } catch (_) {}
       if (!saved) return structuredClone(DEFAULT_CONFIG);
       const parsed = typeof saved === 'string' ? JSON.parse(saved) : saved;
       if (parsed.examSeparators?.__regexp) parsed.examSeparators = new RegExp(parsed.examSeparators.__regexp);
       if (typeof parsed.examNamesExtra === 'string') parsed.examNamesExtra = parsed.examNamesExtra.split(/[,，\n]/).map(norm).filter(Boolean);
       if (!Array.isArray(parsed.examNamesCatalog)) parsed.examNamesCatalog = [];
-      // 旧配置升级到完整十分钟调试窗口；用户在设置中关闭后会保存当前选择。
+      // 补齐旧配置的调试字段；用户在设置中关闭后保持其明确选择。
       if (parsed.developerMode == null) {
         parsed.developerMode = true;
         developerModeMigrationApplied = true;
       }
-      if (parsed.developerModeDebugWindowVersion !== SCRIPT_VERSION) {
-        parsed.developerMode = true;
-        parsed.developerModeDebugWindowVersion = SCRIPT_VERSION;
+      // Persistence migration has a fixed schema, independent of release version.
+      // An explicit user switch or filter choice must survive every code update.
+      if (Number(parsed.developerModeDebugWindowSchema || 0) < 2) {
+        parsed.developerModeDebugWindowSchema = 2;
         developerModeMigrationApplied = true;
       }
       if (parsed.realtimeHints == null) parsed.realtimeHints = true;
@@ -208,17 +525,42 @@
       if (!parsed.examSiteCount) parsed.examSiteCount = parsed.singleSiteOnly ? { min: 1, max: 1 } : { min: null, max: null };
       if (parsed.applicationTime && parsed.applicationTime.mode === 'today' && parsed.applicationTime.minMinutes == null && parsed.applicationTime.maxMinutes == null) parsed.applicationTime = { ...parsed.applicationTime, mode: 'window', minMinutes: 5, maxMinutes: 30 };
       const merged = merge(structuredClone(DEFAULT_CONFIG), parsed);
-      return migrateConfig(merged, parsed);
+      const migrated = migrateConfig(merged, parsed);
+      // 将一次性兼容修正写回存储；不因脚本版本变化重设用户配置。
+      if (developerModeMigrationApplied || parsed.developerRetentionMinutes !== migrated.developerRetentionMinutes || parsed.enabled !== migrated.enabled || parsed.skipLockedRecords !== migrated.skipLockedRecords || JSON.stringify(parsed.autoEntrySchedule) !== JSON.stringify(migrated.autoEntrySchedule)) {
+        try { persistConfigValue(migrated); } catch (_) {}
+      }
+      return migrated;
     } catch (e) {
       console.warn('[自动诊断] 配置读取失败，使用默认配置', e);
       return structuredClone(DEFAULT_CONFIG);
     }
   }
 
+  function normalizeDeveloperRetentionMinutes(raw) {
+    if ((typeof raw !== 'number' && typeof raw !== 'string') || (typeof raw === 'string' && !raw.trim())) return 60;
+    const minutes = Number(raw);
+    return Number.isFinite(minutes) && minutes >= 1 && minutes <= 10080 ? Math.floor(minutes) : 60;
+  }
+
+  function normalizeExamNameList(raw) {
+    const values = typeof raw === 'string' ? raw.split(/[,，;；\n]/) : Array.isArray(raw) ? raw : [];
+    return [...new Set(values.filter(value => typeof value === 'string').map(norm).filter(value => value && value !== '不限' && value !== '无排除'))];
+  }
+
+  function buildExamOptionCatalog(value, observed = []) {
+    return normalizeExamNameList([
+      ...normalizeExamNameList(value?.examNamesCatalog), ...normalizeExamNameList(value?.examNames),
+      ...normalizeExamNameList(value?.examNamesExtra), ...normalizeExamNameList(value?.examNamesExcluded),
+      ...normalizeExamNameList(observed), ...DEFAULT_CONFIG.examNames,
+      '肋骨平扫', '左侧肋骨平扫', '右侧肋骨平扫', '双侧肋骨平扫'
+    ]);
+  }
+
   function merge(base, extra) {
     if (!extra || typeof extra !== 'object') return base;
     for (const [k, v] of Object.entries(extra)) {
-      if (v && typeof v === 'object' && !Array.isArray(v) && base[k] && typeof base[k] === 'object') {
+      if (v && typeof v === 'object' && !(v instanceof RegExp) && !Array.isArray(v) && base[k] && typeof base[k] === 'object') {
         base[k] = merge(base[k], v);
       } else if (v !== undefined) base[k] = v;
     }
@@ -226,6 +568,19 @@
   }
 
   function migrateConfig(value, original = value) {
+    value.developerRetentionMinutes = normalizeDeveloperRetentionMinutes(value.developerRetentionMinutes);
+    value.examNamesExcluded = normalizeExamNameList(value.examNamesExcluded);
+    value.examNamesCatalog = normalizeExamNameList(value.examNamesCatalog);
+    // 已锁定的报告是进入硬门禁，旧方案不能通过关闭配置放宽。
+    value.skipLockedRecords = true;
+    const schedule = value.autoEntrySchedule;
+    const state = autoEntryScheduleState(new Date(), schedule && typeof schedule === 'object' && !Array.isArray(schedule) ? schedule : {});
+    if (state.expired || state.requiresSelection) {
+      value.autoEntrySchedule = { slot: '', date: '', requiresSelection: true };
+      value.enabled = false;
+    } else if (!state.configured) {
+      value.autoEntrySchedule = { slot: '', date: '', requiresSelection: false };
+    }
     // 0.8.10 期间曾保存过 pageQueryRefresh=false；升级到协议+可见列表同步后，
     // 旧配置只迁移一次，避免用户必须手动点击查询。之后用户主动关闭会保持关闭。
     if (Number(original?.configSchema || 0) < 2) {
@@ -248,7 +603,47 @@
   }
 
   function saveConfig() {
-    GM_setValue(STORAGE_KEY, JSON.stringify(config, (k, v) => v instanceof RegExp ? { __regexp: v.source } : v));
+    config.developerRetentionMinutes = normalizeDeveloperRetentionMinutes(config.developerRetentionMinutes);
+    config.examNamesExcluded = normalizeExamNameList(config.examNamesExcluded);
+    config.examNamesCatalog = normalizeExamNameList(config.examNamesCatalog);
+    persistConfigValue(config);
+  }
+  function persistConfigValue(value) {
+    value.configurationSavedAt = Math.max(Date.now(), Number(value.configurationSavedAt || 0) + 1);
+    const encoded = JSON.stringify(value, (k, v) => v instanceof RegExp ? { __regexp: v.source } : v);
+    try { developerLocalStorage()?.setItem(STORAGE_KEY + ':durable-v1', encoded); } catch (_) {}
+    GM_setValue(STORAGE_KEY, encoded);
+  }
+
+  function configWithCurrentEntrySchedule(saved) {
+    // 筛选方案、导入与恢复默认均不能签发新的日期授权；时段必须明确点击选择。
+    const autoEntrySchedule = structuredClone(config.autoEntrySchedule || DEFAULT_CONFIG.autoEntrySchedule);
+    return migrateConfig(merge(structuredClone(DEFAULT_CONFIG), { ...saved, autoEntrySchedule }), saved);
+  }
+
+  function entryDelayPlan() {
+    const seconds = Math.max(0, Math.min(300, Number(config.entryDelaySeconds) || 0));
+    const level = Math.max(0, Math.min(3, Number(config.humanizeEntryLevel) || 0));
+    const jitterRanges = [[0, 0], [50, 250], [200, 700], [500, 1500]];
+    const [minJitter, maxJitter] = jitterRanges[level];
+    const jitterMs = maxJitter > minJitter
+      ? Math.floor(minJitter + Math.random() * (maxJitter - minJitter + 1))
+      : minJitter;
+    return { seconds, level, baseMs: seconds * 1000, jitterMs, totalMs: seconds * 1000 + jitterMs };
+  }
+
+  async function waitBeforeEntry() {
+    const plan = entryDelayPlan();
+    if (!plan.totalMs) return plan;
+    developerLog('协议进入延迟等待', {
+      source: 'entry-gate',
+      seconds: plan.seconds,
+      humanizeLevel: plan.level,
+      jitterMs: plan.jitterMs,
+      totalMs: plan.totalMs
+    }, { force: true });
+    await new Promise(resolve => setTimeout(resolve, plan.totalMs));
+    return plan;
   }
 
   function debugHash(value) {
@@ -261,7 +656,7 @@
   }
   function debugTag(d) {
     if (!d) return '';
-    // 同时保留不可逆短标签用于聚合；完整字段仅在本机十分钟滚动调试记录中使用。
+    // 同时保留不可逆短标签用于聚合；完整字段仅在本机滚动调试记录中使用。
     const raw = [d.key, d.applicationNo, d.patient, d.applyTime, d.exam, d.modality].filter(Boolean).join('|');
     return raw ? `候选-${debugHash(raw)}` : '';
   }
@@ -298,12 +693,12 @@
   }
   function pruneDeveloperEvents(now = Date.now()) {
     const before = debugEvents.length;
-    const cutoff = now - DEBUG_RETENTION_MS;
-    for (let i = debugEvents.length - 1; i >= 0; i--) {
-      const at = Date.parse(debugEvents[i]?.at || '');
-      if (!Number.isFinite(at) || at < cutoff) debugEvents.splice(i, 1);
+    readDeveloperReset();
+    for (const events of [debugEvents, debugWriterEvents]) {
+      const retained = retainedDeveloperEvents(events, now);
+      events.length = 0;
+      for (const event of retained) events.push(event);
     }
-    while (debugEvents.length > DEBUG_EVENT_LIMIT) debugEvents.shift();
     return before !== debugEvents.length;
   }
   function developerLog(event, detail = {}, options = {}) {
@@ -313,21 +708,48 @@
     const key = `${event}|${detail.tag || ''}|${detail.reason || ''}`;
     if (!options.force && now - (debugLastAt.get(key) || 0) < DEBUG_EVENT_THROTTLE_MS) return;
     debugLastAt.set(key, now);
-    const item = { at: new Date(now).toISOString(), event, ...detail };
+    const item = { at: new Date(now).toISOString(), event, ...detail, eventId: `${debugWriterId}:${++debugEventSequence}`, debugResetId: debugResetMarker.token };
     debugEvents.push(item);
+    debugWriterEvents.push(item);
     pruneDeveloperEvents(now);
-    persistDeveloperEvents();
+    scheduleDeveloperPersistence(isCriticalDeveloperEvent(event, options));
     scheduleDeveloperCleanup();
     // CUA/浏览器日志桥会把第二个对象参数折叠成“Object”，导致无法判断
-    // 候选究竟在哪一步被过滤、排队或拒绝；直接输出完整调试对象，便于十分钟内复盘。
+    // 候选究竟在哪一步被过滤、排队或拒绝；直接输出完整调试对象供复盘。
     console.info(`[自动诊断][开发者] ${JSON.stringify(item)}`);
   }
   function developerLogText() {
-    return JSON.stringify({ version: SCRIPT_VERSION, exportedAt: new Date().toISOString(), events: debugEvents }, null, 2);
+    collectDeveloperEvents(true);
+    return JSON.stringify({ version: SCRIPT_VERSION, exportedAt: new Date().toISOString(), retentionMinutes: normalizeDeveloperRetentionMinutes(config.developerRetentionMinutes), events: debugEvents }, null, 2);
   }
   function developerModeStateText() {
-    if (!config.developerMode) return '当前关闭';
-    return `${developerModeMigrationApplied ? '当前开启（已迁移）' : '当前开启'}（最近10分钟 ${debugEvents.length} 条）`;
+    return `${config.developerMode ? (developerModeMigrationApplied ? '当前开启（已迁移）' : '当前开启') : '当前关闭'}（最近${developerRetentionLabel()} ${debugEvents.length} 条）`;
+  }
+  function refreshDeveloperRetentionUI() {
+    const box = document.getElementById('jx-auto-diagnose-panel');
+    if (!box) return;
+    const minutes = normalizeDeveloperRetentionMinutes(config.developerRetentionMinutes);
+    const preset = box.querySelector('[data-f="developerRetentionPreset"]');
+    if (preset) preset.value = [10, 30, 60, 120, 360, 1440].includes(minutes) ? String(minutes) : 'custom';
+    const custom = box.querySelector('[data-f="developerRetentionMinutes"]');
+    if (custom) custom.value = minutes;
+    const customLabel = box.querySelector('[data-a="developerRetentionCustom"]');
+    if (customLabel) customLabel.hidden = preset?.value !== 'custom';
+    const state = box.querySelector('[data-a="debugState"]');
+    if (state) state.textContent = developerModeStateText();
+    const help = box.querySelector('[data-a="developerRetentionHelp"]');
+    if (help) help.textContent = `自动保留最近${developerRetentionLabel()}完整调试记录，超时每分钟自动清理；修改后立即保存，刷新和升级后仍有效。缩短会删除超时记录，延长不能恢复已删除记录。自检只读，不修改报告状态。记录不保存 Cookie、Authorization 或密码。`;
+    const copy = box.querySelector('[data-a="copyDebug"]');
+    if (copy) copy.title = `复制最近${developerRetentionLabel()}内的诊断记录`;
+  }
+  function setDeveloperRetentionMinutes(raw) {
+    const previous = normalizeDeveloperRetentionMinutes(config.developerRetentionMinutes);
+    config.developerRetentionMinutes = normalizeDeveloperRetentionMinutes(raw);
+    saveConfig();
+    pruneDeveloperEvents(); persistDeveloperEvents(); collectDeveloperEvents(true);
+    pruneCandidateLifecycle(); refreshDeveloperRetentionUI();
+    developerLog('开发者记录保留时长修改', { source: 'settings', previousMinutes: previous, retentionMinutes: config.developerRetentionMinutes }, { force: true });
+    refreshDeveloperRetentionUI();
   }
 
   // 页面偶尔会在姓名/机构之间插入不可见空白；统一清理后再做字段和账号匹配。
@@ -387,30 +809,51 @@
     return headers;
   }
   async function ensureClientIp() {
-    if (clientIp || clientIpRequest || typeof RTCPeerConnection === 'undefined') return clientIp;
-    clientIpRequest = new Promise(resolve => {
+    if (clientIp) return clientIp;
+    if (clientIpRequest) return clientIpRefreshInBackground ? clientIp : clientIpRequest;
+    if (Date.now() < clientIpRetryAfter || typeof RTCPeerConnection === 'undefined') return clientIp;
+    const refreshInBackground = clientIpRetryAfter > 0;
+    const request = new Promise(resolve => {
       let peer;
       let finished = false;
+      let timeout;
       const done = value => {
         if (finished) return;
         finished = true;
+        clearTimeout(timeout);
         try { peer?.close?.(); } catch (_) {}
-        if (value) clientIp = value;
+        if (value) { clientIp = value; clientIpRetryAfter = 0; }
+        // mDNS 或受限 WebRTC 可能始终不给数值地址，不能让每个业务请求都等 1.8 秒。
+        else clientIpRetryAfter = Date.now() + 60000;
         resolve(clientIp);
       };
-      const timeout = setTimeout(() => done(''), 1800);
+      timeout = setTimeout(() => done(''), 1800);
       try {
         peer = new RTCPeerConnection({ iceServers: [] });
         peer.createDataChannel('');
         peer.onicecandidate = event => {
+          if (!event?.candidate) { done(''); return; }
           const candidate = event?.candidate?.candidate || '';
           const match = candidate.match(/(?:^|\s)([0-9]{1,3}(?:\.[0-9]{1,3}){3}|[a-f0-9]{1,4}(?::[a-f0-9]{1,4}){7})(?:\s|$)/i);
-          if (match) { clearTimeout(timeout); done(match[1]); }
+          if (match) done(match[1]);
+        };
+        peer.onicegatheringstatechange = () => {
+          if (peer.iceGatheringState === 'complete') done('');
         };
         peer.createOffer().then(offer => peer.setLocalDescription(offer)).catch(() => done(''));
-      } catch (_) { clearTimeout(timeout); done(''); }
+      } catch (_) { done(''); }
     });
-    try { return await clientIpRequest; } finally { clientIpRequest = null; }
+    const sharedRequest = request.then(value => {
+      if (clientIpRequest === sharedRequest) {
+        clientIpRequest = null;
+        clientIpRefreshInBackground = false;
+      }
+      return value;
+    });
+    clientIpRequest = sharedRequest;
+    clientIpRefreshInBackground = refreshInBackground;
+    // 首次准备仍被请求链等待；失败后的定期重试只在后台进行，不反复阻塞业务请求。
+    return refreshInBackground ? clientIp : sharedRequest;
   }
   async function ensureSessionIdentity() {
     const now = Date.now();
@@ -420,6 +863,7 @@
     sessionIdentity.loading = true;
     sessionIdentity.lastAttemptAt = now;
     const request = (async () => {
+      const startedAt = Date.now();
       try {
         const { response, payload } = await fetchJson('/api/admin/user/info', {
           method: 'GET', credentials: 'include', headers: { Accept: 'application/json' }, __tokenRecoveryRetry: true
@@ -430,7 +874,10 @@
           return;
         }
       } catch (_) {}
-      sessionIdentity.loading = false;
+      finally {
+        sessionIdentity.loading = false;
+        developerLog('会话身份准备完成', { durationMs: Date.now() - startedAt, loaded: !!sessionIdentity.uid });
+      }
     })();
     sessionIdentityRequest = request;
     try { return await request; }
@@ -443,14 +890,30 @@
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), Math.max(1000, Number(timeoutMs) || 4500));
       try {
+        const preparationStartedAt = Date.now();
         await ensureClientIp();
-        const { __tokenRecoveryRetry: _internalRetry, ...networkOptions } = requestOptions;
+        const clientIpWaitMs = Date.now() - preparationStartedAt;
+        const { __tokenRecoveryRetry: _internalRetry, __hintAt: hintAt, __identityWaitMs: identityWaitMs, __requestId: requestId, ...networkOptions } = requestOptions;
         const requestHeaders = sessionHeaders(networkOptions.headers || {});
-        const response = await request(url, { ...networkOptions, headers: requestHeaders, signal: controller.signal });
+        const networkStartedAt = Date.now();
+        const responsePromise = request(url, { ...networkOptions, headers: requestHeaders, signal: controller.signal });
+        const timing = {
+          requestId: String(requestId || '').slice(0, 128),
+          networkStartedAt,
+          preparationMs: networkStartedAt - preparationStartedAt,
+          identityWaitMs: Math.max(0, Number(identityWaitMs) || 0),
+          clientIpWaitMs,
+          hintToNetworkMs: Number(hintAt) > 0 ? Math.max(0, networkStartedAt - Number(hintAt)) : null,
+          withinOneSecond: Number(hintAt) > 0 ? networkStartedAt - Number(hintAt) <= 1000 : null
+        };
+        // 在真正调用 fetch 后记录；此前的“列表请求发起”只代表调度开始。
+        developerLog('协议网络请求发起', { path: String(url).split('?')[0], method: String(networkOptions.method || 'GET').toUpperCase(), ...timing, clientIpPresent: !!clientIp, clientIpRetryDeferred: !clientIp && Date.now() < clientIpRetryAfter });
+        const response = await responsePromise;
         let payload = null;
         try { payload = await response.json(); } catch (_) {}
-        developerLog('协议响应认证上下文', { path: String(url).split('?')[0], code: payload?.code ?? null, auth: debugAuthContext(requestHeaders) });
-        return { response, payload };
+        timing.networkDurationMs = Date.now() - networkStartedAt;
+        developerLog('协议响应认证上下文', { path: String(url).split('?')[0], code: payload?.code ?? null, auth: debugAuthContext(requestHeaders), ...timing });
+        return { response, payload, timing };
       } finally { clearTimeout(timeout); }
     };
     const result = await run(options);
@@ -929,16 +1392,27 @@
     return preliminary + exam * 100 + institution * 10 + applyTime;
   }
 
+  function isExcludedExam(d) {
+    const excluded = normalizeExamNameList(config.examNamesExcluded);
+    if (!excluded.length) return false;
+    const exam = String(d?.exam || d?.record?.examName || d?.record?.exam || '');
+    return exam.split(config.examSeparators).map(norm).filter(Boolean).some(part => excluded.includes(part));
+  }
+
   function lockValue(value) {
-    if (value === true || value === 1) return true;
+    if (value === true || (typeof value === 'number' && Number.isFinite(value) && value > 0)) return true;
     const text = norm(value).toLowerCase();
     if (['', 'false', '0', 'no', '否', '无', '空', 'none', 'null', 'nil', 'unlocked', 'not locked', 'not occupied', '未锁定', '未占用', '未被占用', '未加锁'].includes(text)) return false;
-    return ['true', '1', 'yes', '是', 'locked', 'lock', '锁定', '占用'].includes(text) || /锁|占用|其他用户|occupied|locked/.test(text);
+    return ['true', '1', 'yes', '是', 'locked', 'lock', '锁定', '占用'].includes(text) || (/^\d+$/.test(text) && Number(text) > 0) || /锁|占用|其他用户|occupied|locked/.test(text);
   }
   function recordLockState(record) {
     if (!record || typeof record !== 'object') return false;
-    return [record.isLock, record.isLocked, record.locked, record.lock, record.lockedByOther, record.lockStatus, record.lockUser, record.lockUserName, record.lockReason, record.occupyStatus, record.occupyUser, record.isOccupied]
-      .some(lockValue);
+    if ([record.isLock, record.isLocked, record.locked, record.lock, record.lockedByOther, record.lockStatus, record.lockReason, record.occupyStatus, record.isOccupied].some(lockValue)) return true;
+    // 锁定医生通常只是姓名/编号，没有“锁定”字样；存在有效归属即视为占用。
+    return [record.lockUser, record.lockUserName, record.lockUserId, record.lockUserUid, record.lockedBy, record.occupyUser, record.occupyUserName, record.occupyUserId].some(value => {
+      const text = norm(value).toLowerCase();
+      return !!text && !['false', '0', 'no', 'none', 'null', 'nil', 'undefined', '无', '空', '未锁定', '未占用'].includes(text);
+    });
   }
   function lockedRecordDetected(d) {
     if (!d) return false;
@@ -947,7 +1421,7 @@
     return /占用|锁定/.test(status) && !/未锁定/.test(status);
   }
   function shouldSkipLocked(d) {
-    return config.skipLockedRecords !== false && lockedRecordDetected(d);
+    return lockedRecordDetected(d);
   }
   function domRowLocked(row) {
     if (!row) return false;
@@ -993,7 +1467,8 @@
     if (!matchTime(d.applyTime, config.applicationTime)) reasons.push('申请时间');
     if (!matchTime(d.diagnosisTime, config.diagnosisTime)) reasons.push('诊断审核时间');
     if (!matchTime(d.auditTime, config.auditTime)) reasons.push('审核时间');
-    const parts = d.exam.split(config.examSeparators).map(norm).filter(Boolean);
+    const parts = String(d.exam || '').split(config.examSeparators).map(norm).filter(Boolean);
+    if (isExcludedExam(d)) reasons.push('检查项目排除');
     const siteRule = config.examSiteCount || (config.singleSiteOnly ? { min: 1, max: 1 } : { min: null, max: null });
     if (siteRule.min != null && parts.length < Number(siteRule.min)) reasons.push('检查部位过少');
     if (siteRule.max != null && parts.length > Number(siteRule.max)) reasons.push('检查部位过多');
@@ -1020,24 +1495,174 @@
 
   function operatorDisabled(item) {
     if (!item) return true;
-    return item.classList.contains('is-disabled') || item.classList.contains('disabled') || item.getAttribute('aria-disabled') === 'true';
+    return item.disabled === true || item.hasAttribute?.('disabled') || item.classList.contains('is-disabled') || item.classList.contains('disabled') || item.getAttribute('aria-disabled') === 'true';
   }
 
   function diagnoseOperator(row) {
     const items = [...row.querySelectorAll(config.selectors.operatorItems)];
     // 页面在部分状态下会把锁定/解锁图标放在最前面，不能再依赖固定序号。
-    const report = items.find(item => /(?:^|-)report$/i.test(operatorIconName(item)) && !operatorDisabled(item));
-    if (report) return report;
-    const titled = items.find(item => /诊断/.test([item.getAttribute('title'), item.getAttribute('aria-label'), item.dataset?.tip, item.dataset?.title].filter(Boolean).join(' ')) && !operatorDisabled(item));
-    if (titled) return titled;
+    const report = items.find(item => /(?:^|-)report$/i.test(operatorIconName(item)));
+    if (report) return operatorDisabled(report) ? null : report;
+    const titled = items.find(item => /诊断/.test([item.getAttribute('title'), item.getAttribute('aria-label'), item.dataset?.tip, item.dataset?.title].filter(Boolean).join(' ')));
+    if (titled) return operatorDisabled(titled) ? null : titled;
     const configured = items[Number(config.selectors.diagnoseOperatorIndex)];
     return configured && !operatorDisabled(configured) ? configured : null;
+  }
+
+  // 最终进入仍由原生报告页发起。导航与回包之间只阻止第二次进入，
+  // 不停止 WebSocket、只读列表或页面观察；按标签页保存以覆盖全页导航。
+  const FINAL_ENTRY_PENDING_KEY = 'jx-radiation-final-entry-pending-v1';
+  const FINAL_ENTRY_PENDING_MS = 30000;
+  let finalEntryPending = null;
+  let finalEntryPendingLoaded = false;
+  let finalEntryPendingTimer = null;
+
+  function persistFinalEntryPending() {
+    try {
+      const storage = pageWindow().sessionStorage;
+      if (finalEntryPending) storage?.setItem(FINAL_ENTRY_PENDING_KEY, JSON.stringify(finalEntryPending));
+      else storage?.removeItem(FINAL_ENTRY_PENDING_KEY);
+    } catch (_) {}
+  }
+
+  function finishFinalEntryPending(reason, repUid = '', detail = {}) {
+    if (!finalEntryPending || (repUid && String(repUid) !== finalEntryPending.repUid)) return false;
+    const pending = finalEntryPending;
+    finalEntryPending = null;
+    if (finalEntryPendingTimer) clearTimeout(finalEntryPendingTimer);
+    finalEntryPendingTimer = null;
+    persistFinalEntryPending();
+    developerLog('最终进入等待结束', {
+      key: pending.repUid ? `rep:${pending.repUid}` : '', recordId: pending.repUid,
+      source: pending.source, reason, durationMs: Math.max(0, Date.now() - pending.startedAt), ...detail
+    }, { force: true });
+    return true;
+  }
+
+  function scheduleFinalEntryPendingExpiry() {
+    if (finalEntryPendingTimer) clearTimeout(finalEntryPendingTimer);
+    finalEntryPendingTimer = null;
+    if (!finalEntryPending) return;
+    const repUid = finalEntryPending.repUid;
+    finalEntryPendingTimer = setTimeout(() => {
+      finalEntryPendingTimer = null;
+      finishFinalEntryPending('final-response-timeout', repUid, { finalReportLoaded: false });
+    }, Math.max(1, finalEntryPending.expiresAt - Date.now()));
+  }
+
+  function pendingFinalEntryState() {
+    if (!finalEntryPendingLoaded) {
+      finalEntryPendingLoaded = true;
+      try {
+        const saved = JSON.parse(pageWindow().sessionStorage?.getItem(FINAL_ENTRY_PENDING_KEY) || 'null');
+        if (saved && typeof saved.repUid === 'string' && saved.repUid.length <= 96 &&
+            Number.isFinite(saved.startedAt) && Number.isFinite(saved.expiresAt) &&
+            saved.startedAt <= Date.now() && saved.expiresAt <= Date.now() + FINAL_ENTRY_PENDING_MS &&
+            saved.expiresAt > saved.startedAt && saved.expiresAt <= saved.startedAt + FINAL_ENTRY_PENDING_MS) {
+          finalEntryPending = {
+            repUid: saved.repUid, startedAt: saved.startedAt, expiresAt: saved.expiresAt,
+            source: saved.source === 'page-click' ? 'page-click' : 'protocol', reportRouteSeen: !!saved.reportRouteSeen,
+            entryKey: typeof saved.entryKey === 'string' ? saved.entryKey.slice(0, 100) : '',
+            entryToken: typeof saved.entryToken === 'string' ? saved.entryToken.slice(0, 200) : ''
+          };
+          scheduleFinalEntryPendingExpiry();
+        }
+      } catch (_) {}
+    }
+    if (finalEntryPending && Date.now() >= finalEntryPending.expiresAt) {
+      finishFinalEntryPending('final-response-timeout', finalEntryPending.repUid, { finalReportLoaded: false });
+    }
+    if (finalEntryPending?.reportRouteSeen && pageWindow().location.pathname === '/radiation') {
+      finishFinalEntryPending('returned-to-list', finalEntryPending.repUid, { finalReportLoaded: false });
+    }
+    if (finalEntryPending && pageWindow().location.pathname === '/radiation/report' && !finalEntryPending.reportRouteSeen) {
+      finalEntryPending.reportRouteSeen = true;
+      if (!finalEntryPending.repUid) {
+        try { finalEntryPending.repUid = new URL(pageWindow().location.href).searchParams.get('id')?.slice(0, 96) || ''; } catch (_) {}
+      }
+      persistFinalEntryPending();
+    }
+    return finalEntryPending;
+  }
+
+  function beginFinalEntryPending(repUid, source) {
+    pendingFinalEntryState();
+    finalEntryPending = {
+      repUid: String(repUid || '').slice(0, 96), startedAt: Date.now(), expiresAt: Date.now() + FINAL_ENTRY_PENDING_MS,
+      source: source === 'page-click' ? 'page-click' : 'protocol', reportRouteSeen: false
+    };
+    persistFinalEntryPending();
+    scheduleFinalEntryPendingExpiry();
+    developerLog('最终进入等待开始', {
+      key: finalEntryPending.repUid ? `rep:${finalEntryPending.repUid}` : '', recordId: finalEntryPending.repUid,
+      source: finalEntryPending.source, timeoutMs: FINAL_ENTRY_PENDING_MS, finalReportLoaded: false
+    }, { force: true });
+  }
+
+  function maintainFinalEntryPendingRoute(path, previous = '') {
+    const pending = pendingFinalEntryState();
+    if (!pending) return;
+    if (path === '/radiation' && (previous === '/radiation/report' || pending.reportRouteSeen)) {
+      finishFinalEntryPending('returned-to-list', pending.repUid, { finalReportLoaded: false });
+    } else if (!isMonitorRoute(path)) {
+      finishFinalEntryPending('left-report-flow', pending.repUid, { finalReportLoaded: false });
+    }
+  }
+
+  function completeFinalEntryPending(detail) {
+    if (detail.endpointKind !== 'radiation-entry' || detail.requestMethod !== 'POST') return false;
+    const pending = pendingFinalEntryState();
+    const repUid = String(detail.repUid || '').slice(0, 96);
+    if (!pending || !repUid || pending.repUid !== repUid) return false;
+    // An old response cannot release a later attempt of the same report.
+    const startedAt = Number(detail.startedAt) || (Date.now() - Math.max(0, Number(detail.durationMs) || 0));
+    if (startedAt < pending.startedAt) return false;
+    return finishFinalEntryPending(`native-${detail.outcome}`, repUid, {
+      code: detail.code ?? null, httpStatus: Number(detail.httpStatus) || 0,
+      finalReportLoaded: detail.outcome === 'complete' && detail.reportIdMatches !== false &&
+        detail.responseRoute === '/radiation/report' && String(detail.responseRouteReportId || '') === repUid
+    });
+  }
+
+  function existingRadiationRouter() {
+    try {
+      const doc = pageWindow().document || document;
+      const root = doc.getElementById?.('app') || doc.querySelector?.('[data-v-app]');
+      const router = root?.__vue_app__?.config?.globalProperties?.$router ||
+        root?.__vueParentComponent?.appContext?.config?.globalProperties?.$router;
+      return typeof router?.push === 'function' ? router : null;
+    } catch (_) { return null; }
+  }
+
+  async function navigateToDiagnosisReport(url, repUid, entryData = null) {
+    const router = existingRadiationRouter();
+    if (router) {
+      try {
+        const result = await router.push(url);
+        if (result && typeof result === 'object' && Number(result.type)) {
+          if (entryData) releaseAutomaticEntry(entryData, 'navigation-cancelled');
+          finishFinalEntryPending('navigation-cancelled', String(repUid), { navigationFailureType: Number(result.type), finalReportLoaded: false });
+          developerLog('诊断路由导航取消', { key: `rep:${repUid}`, recordId: String(repUid), source: 'vue-router', navigationFailureType: Number(result.type) }, { force: true });
+          return false;
+        }
+        developerLog('诊断路由导航', { key: `rep:${repUid}`, recordId: String(repUid), source: 'vue-router', fullReload: false }, { force: true });
+        return true;
+      } catch (error) {
+        developerLog('诊断路由导航回退', { key: `rep:${repUid}`, recordId: String(repUid), source: 'vue-router', error: debugError(error), fullReload: true }, { force: true });
+      }
+    }
+    // Full navigation can terminate this userscript before its awaiting caller
+    // resumes. Persist the dispatched entry synchronously before assigning href.
+    if (entryData) consumeAutomaticEntry(entryData, 'automatic-navigation');
+    pageWindow().location.href = url;
+    return true;
   }
 
   // diagnosisActive 是本脚本刚发起进入后的短期互斥锁。列表仍会继续刷新；
   // 如果列表中已没有带诊断医生姓名的“诊断中”记录，视为当前入口已释放，
   // 允许下一位客户再次走协议校验。列表暂时不可读时保持锁，交给服务端门禁兜底。
   function entryDiagnosisLockActive() {
+    if (pendingFinalEntryState()) return true;
     if (!diagnosisActive) return false;
     const rows = queryBodyRows();
     if (!rows.length) return true;
@@ -1067,16 +1692,49 @@
     return config.monitoringEnabled !== false;
   }
   function isAutoOpenEnabled() {
-    return config.enabled === true;
+    const state = autoEntryScheduleState();
+    if (state.expired) {
+      clearExpiredAutoEntrySchedule(state);
+      return false;
+    }
+    if (state.requiresSelection) return false;
+    // 未选择时段时保留旧版本的不限时行为；一旦选择时段，只有当前时段内才允许进入。
+    return config.enabled === true && (!state.configured || state.active);
+  }
+
+  function scheduleAutoEntryScheduleExpiry() {
+    if (autoEntryScheduleTimer) { clearTimeout(autoEntryScheduleTimer); autoEntryScheduleTimer = null; }
+    const state = autoEntryScheduleState();
+    if (!state.configured) return;
+    if (state.expired) {
+      clearExpiredAutoEntrySchedule(state);
+      return;
+    }
+    const waitMs = Math.max(1000, (state.active ? state.endAt : state.startAt) - Date.now() + 50);
+    autoEntryScheduleTimer = setTimeout(() => {
+      autoEntryScheduleTimer = null;
+      const current = autoEntryScheduleState();
+      if (current.expired) clearExpiredAutoEntrySchedule(current);
+      else { refreshAutoEntryScheduleUI(); scheduleAutoEntryScheduleExpiry(); }
+    }, Math.min(waitMs, 2147483647));
   }
 
   function clickDiagnose(d) {
+    if (isExcludedExam(d)) {
+      d.__entryBlocked = '检查项目排除';
+      developerLog('页面点击跳过', { ...debugCandidate(d), reason: d.__entryBlocked });
+      return false;
+    }
     if (!isAutoOpenEnabled()) {
       developerLog('观察模式跳过自动打开', { ...debugCandidate(d), source: 'page-click', reason: '自动打开已关闭' });
       return false;
     }
     if (entryDiagnosisLockActive()) return false;
     if (!d?.row) return false;
+    if (shouldSkipLocked(d)) {
+      developerLog('页面点击跳过', { ...debugCandidate(d), reason: '报告已锁定/占用' });
+      return false;
+    }
     const current = rowData(d.row);
     if (!isPendingReport(current)) {
       developerLog('页面点击跳过', { ...debugCandidate(current), reason: shouldSkipLocked(current) ? '报告已锁定/占用' : '报告状态非待诊断' });
@@ -1088,15 +1746,85 @@
       console.warn('[自动诊断] 找不到可用的诊断操作按钮', { items });
       return false;
     }
+    const record = d.record || current.record || findRowRecord(d);
+    const repUid = record?.repUid || record?.reportUid || record?.reportId || record?.id || '';
+    if (record) d.record = record;
+    if (automaticEntryBlockReason(d) || !reserveAutomaticEntry(d)) {
+      developerLog('页面点击跳过', { ...debugCandidate(d), reason: automaticEntryBlockReason(d) || '缺少稳定报告编号或无法保存进入记录' });
+      return false;
+    }
+    beginFinalEntryPending(repUid, 'page-click');
+    finalEntryPending.entryKey = d.__automaticEntryKey;
+    finalEntryPending.entryToken = d.__automaticEntryToken;
+    persistFinalEntryPending();
+    diagnosisActive = true;
     item.scrollIntoView?.({ block: 'center', inline: 'nearest' });
-    if (typeof item.click === 'function') item.click();
-    else item.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    try {
+      if (!consumeAutomaticEntry(d, 'automatic-page-click')) {
+        releaseAutomaticEntry(d, 'entry-not-durable');
+        finishFinalEntryPending('entry-not-durable', String(repUid), { finalReportLoaded: false });
+        diagnosisActive = false;
+        return false;
+      }
+      if (typeof item.click === 'function') item.click();
+      else item.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    } catch (error) {
+      releaseAutomaticEntry(d, 'page-click-threw');
+      finishFinalEntryPending('page-click-threw', String(repUid), { error: debugError(error), finalReportLoaded: false });
+      throw error;
+    }
     return true;
   }
 
   // Vue 表格行没有把 repUid 渲染到 DOM。用户脚本仍可从 Vue 的 vnode/component
   // 引用中取到行对象；遍历范围刻意限制在当前行附近，避免扫描整棵组件树。
+  function stableReportRecordUid(record) {
+    if (!record || typeof record !== 'object' || Array.isArray(record)) return '';
+    const raw = record.repUid || record.reportUid || record.reportId || record.id;
+    if (typeof raw !== 'string' && typeof raw !== 'number') return '';
+    const value = String(raw).trim();
+    return value && value.length <= 96 && !/[\u0000-\u0020\u007f]/.test(value) ? value : '';
+  }
+
+  function reportRecordMatchScore(record, d) {
+    if (!stableReportRecordUid(record) || !d) return 0;
+    const wantedName = candidatePatientName(d), actualName = norm(record.patName || record.patientName);
+    const wantedApplication = norm(d.applicationNo);
+    const applications = [record.applyNo, record.applicationNo, record.orderId].map(norm).filter(Boolean);
+    const applicationMatches = !!wantedApplication && applications.includes(wantedApplication);
+    // 姓名或申请单号相矛盾时，不能用相同检查项目补偿身份不匹配。
+    if (wantedName && actualName && wantedName !== actualName) return 0;
+    if (wantedApplication && applications.length && !applicationMatches) return 0;
+    const wantedExam = norm(d.exam), actualExam = norm(record.examName || record.exam);
+    const examMatches = !!wantedExam && wantedExam === actualExam;
+    if (wantedExam && actualExam && !examMatches) return 0;
+    const wantedTime = norm(d.applyTime), actualTime = norm(record.checkinTime || record.applyTime || record.initiateTime);
+    let timeMatches = false;
+    if (wantedTime && actualTime) {
+      const left = parseDate(wantedTime), right = parseDate(actualTime);
+      timeMatches = left && right ? left.getTime() === right.getTime() : wantedTime === actualTime;
+      if (!timeMatches) return 0;
+    }
+    const nameMatches = !!wantedName && wantedName === actualName;
+    // 无申请单号时，姓名必须精确匹配，并至少有一个检查/申请时间辅助证据。
+    if (!applicationMatches && !(nameMatches && (examMatches || timeMatches))) return 0;
+    return (applicationMatches ? 100 : 0) + (nameMatches ? 10 : 0) + (examMatches ? 4 : 0) + (timeMatches ? 3 : 0);
+  }
+
+  function selectReportRecord(records, d) {
+    const matches = new Map();
+    for (const record of records || []) {
+      const uid = stableReportRecordUid(record), score = reportRecordMatchScore(record, d);
+      if (!uid || !score) continue;
+      if (!matches.has(uid) || matches.get(uid).score < score) matches.set(uid, { record, score });
+    }
+    const ordered = [...matches.values()].sort((a, b) => b.score - a.score);
+    // 同名同项目/同申请单的多个报告无法唯一对应时，不猜第一条。
+    return ordered.length && (ordered.length === 1 || ordered[0].score > ordered[1].score) ? ordered[0].record : null;
+  }
+
   function findRowRecord(d) {
+    if (stableReportRecordUid(d?.record)) return d.record;
     const isolatedRoot = d?.row;
     const page = pageWindow();
     let root = isolatedRoot;
@@ -1121,20 +1849,13 @@
     add(root.parentElement?.__vnode);
     add(root.parentElement?.parentElement?.__vueParentComponent);
     add(root.parentElement?.parentElement?.__vnode);
-    const patientName = norm(d.patient).split(/门诊|急诊|住院|体检/)[0];
-    const wanted = [norm(d.applicationNo), patientName, norm(d.applyTime), norm(d.exam)].filter(Boolean);
-    const isRecord = value => {
-      if (!value || typeof value !== 'object' || !value.repUid) return false;
-      const text = norm([value.patName, value.patientName, value.applyNo, value.applicationNo, value.orderId, value.examName, value.checkTime, value.checkinTime, value.applyTime, value.studyDate, value.reportStatus].filter(Boolean).join('|'));
-      // 只接受能与当前行任一字段对应的记录，避免误取同一组件树中的其它行。
-      return !wanted.length || wanted.some(x => text.includes(x));
-    };
+    const records = [];
     const seenObj = new WeakSet();
     for (let i = 0; i < queue.length && i < 80; i++) {
       const value = queue[i];
       if (!value || (typeof value !== 'object' && typeof value !== 'function') || seenObj.has(value)) continue;
       seenObj.add(value);
-      if (isRecord(value)) return value;
+      if (stableReportRecordUid(value) && reportRecordMatchScore(value, d)) records.push(value);
       let keys = [];
       try { keys = Object.keys(value); } catch (_) {}
       for (const key of keys.slice(0, 120)) {
@@ -1147,7 +1868,7 @@
         try { add(value[key]); } catch (_) {}
       }
     }
-    return null;
+    return selectReportRecord(records, d);
   }
 
   function radiationListPayload(options = {}) {
@@ -1197,10 +1918,12 @@
       checkOrgId: debugCredentialShape(scopeId)
     });
     try {
+      const identityStartedAt = Date.now();
       await ensureSessionIdentity();
+      const identityWaitMs = Date.now() - identityStartedAt;
       scopeId = currentCheckOrgId(options);
-      let { response, payload: json } = await fetchJson('/api/ct/rays/rep/list', {
-        method: 'POST', credentials: 'include',
+      let { response, payload: json, timing } = await fetchJson('/api/ct/rays/rep/list', {
+        method: 'POST', credentials: 'include', __hintAt: options.hintAt, __requestId: requestId, __identityWaitMs: identityWaitMs,
         headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
         body: JSON.stringify(radiationListPayload(options))
       }, options.timeoutMs || 5000);
@@ -1208,15 +1931,15 @@
       // 避免服务端筛选错误让实时轮询进入退避状态。
       if (json?.code === 2002 && !options.ignoreStatusFilter) {
         developerLog('列表筛选退回客户端过滤', { requestId, source: options.reason || 'list', code: json.code });
-        ({ response, payload: json } = await fetchJson('/api/ct/rays/rep/list', {
-          method: 'POST', credentials: 'include',
+        ({ response, payload: json, timing } = await fetchJson('/api/ct/rays/rep/list', {
+          method: 'POST', credentials: 'include', __hintAt: options.hintAt, __requestId: requestId, __identityWaitMs: identityWaitMs,
           headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
           body: JSON.stringify(radiationListPayload({ ...options, match: null, pageSize: 100, ignoreStatusFilter: true, ignoreModalityFilter: true, ignoreInstitutionFilter: true, ignoreBodyPartFilter: true }))
         }, options.timeoutMs || 5000));
       }
       const records = json?.data?.records || json?.data?.list || (Array.isArray(json?.data) ? json.data : []);
       if (!response.ok || json?.code !== 200 || !Array.isArray(records)) {
-        developerLog('列表请求结果', { requestId, source: options.reason || 'list', ok: false, httpOk: !!response.ok, httpStatus: response.status ?? null, code: json?.code ?? null, count: 0, durationMs: Date.now() - startedAt, diagnosisActive, entryRunning, checkOrgId: debugCredentialShape(scopeId) });
+        developerLog('列表请求结果', { requestId, ...timing, source: options.reason || 'list', ok: false, httpOk: !!response.ok, httpStatus: response.status ?? null, code: json?.code ?? null, count: 0, durationMs: Date.now() - startedAt, diagnosisActive, entryRunning, checkOrgId: debugCredentialShape(scopeId) });
         // When the protocol session is rejected but the rendered workbench is
         // still usable, let the page's own Axios request refresh its session
         // headers once.  This is a bounded visible-page fallback, not a new
@@ -1254,7 +1977,7 @@
         });
         if (fallback.length) return fallback;
       }
-      developerLog('列表请求结果', { requestId, source: options.reason || 'list', ok: true, httpStatus: response.status ?? null, code: json?.code ?? null, count: records.length, durationMs: Date.now() - startedAt, diagnosisActive, entryRunning, checkOrgId: debugCredentialShape(scopeId) });
+      developerLog('列表请求结果', { requestId, ...timing, source: options.reason || 'list', ok: true, httpStatus: response.status ?? null, code: json?.code ?? null, count: records.length, durationMs: Date.now() - startedAt, diagnosisActive, entryRunning, checkOrgId: debugCredentialShape(scopeId) });
       return records;
     } catch (e) {
       console.warn('[自动诊断] 列表协议查询失败', String(e));
@@ -1264,26 +1987,10 @@
   }
 
   async function findRowRecordByApi(d) {
+    if (stableReportRecordUid(d?.record)) return d.record;
     try {
       const records = await fetchRadiationRecords({ match: d, pageSize: 20, timeoutMs: 4500 });
-      const patientName = candidatePatientName(d);
-      const score = record => {
-        let n = 0;
-        if (d.applicationNo && [record.applyNo, record.applicationNo].some(x => norm(x) === norm(d.applicationNo))) n += 20;
-        if ([record.orderId, record.patId].some(x => norm(x) && norm(x) === norm(d.applicationNo))) n += 10;
-        if (patientName && norm(record.patName || record.patientName).includes(patientName)) n += 5;
-        if (d.exam && norm(record.examName).includes(norm(d.exam))) n += 4;
-        if (d.applyTime && norm(record.checkinTime || record.applyTime).includes(norm(d.applyTime))) n += 3;
-        return n;
-      };
-      let best = null, bestScore = 0;
-      for (const record of records) {
-        const recordId = record?.repUid || record?.reportUid || record?.reportId || record?.id;
-        if (!recordId) continue;
-        const current = score(record);
-        if (current > bestScore) { best = record; bestScore = current; }
-      }
-      return bestScore >= 4 ? best : null;
+      return selectReportRecord(records, d);
     } catch (e) {
       return null;
     }
@@ -1294,7 +2001,17 @@
       developerLog('观察模式跳过自动打开', { ...debugCandidate(d), source: 'protocol', reason: '自动打开已关闭' });
       return false;
     }
+    const pageBlock = pageEntryBlockReason(d);
+    if (pageBlock) {
+      d.__entryBlocked = pageBlock;
+      developerLog('协议进入跳过', { ...debugCandidate(d), reason: pageBlock });
+      return false;
+    }
     const record = d?.record || findRowRecord(d) || await findRowRecordByApi(d);
+    // Keep the resolved UID on the original DOM candidate as well as the
+    // protocol view: a later DOM observation must see the same stable identity.
+    if (record) d.record = record;
+    if (!isAutoOpenEnabled() || !isMonitorRoute() || entryDiagnosisLockActive()) return false;
     const repUid = record?.repUid || record?.reportUid || record?.reportId || record?.id;
     const recordView = record ? recordData(record) : null;
     const entryData = {
@@ -1305,11 +2022,16 @@
       locked: !!(recordView?.locked || d?.locked),
       record
     };
+    if (isExcludedExam(entryData)) {
+      d.__entryBlocked = '检查项目排除';
+      developerLog('协议进入跳过', { ...debugCandidate(entryData), reason: d.__entryBlocked });
+      return false;
+    }
     const lifecycle = observeCandidateLifecycle(entryData, 'assertAllowEnter', {
       eligible: isPendingReport(entryData) && !shouldSkipLocked(entryData),
       stage: 'assertAllowEnter'
     });
-    if (shouldSkipLocked(entryData) || (!isPendingReport(entryData) && !d?.__realtimeNeedsServerStatus)) {
+    if (!isPendingReport(entryData)) {
       d.__entryBlocked = shouldSkipLocked(entryData) ? '报告已锁定/占用' : '报告状态非待诊断';
       developerLog('协议进入跳过', { ...debugCandidate(entryData, { lifecycle: lifecycleDebug(lifecycle) }), reason: d.__entryBlocked });
       return false;
@@ -1319,20 +2041,37 @@
       developerLog('协议进入跳过', { ...debugCandidate(entryData), reason: '缺少记录编号' });
       return false;
     }
+    const alreadyEntered = automaticEntryBlockReason(entryData);
+    if (alreadyEntered || !reserveAutomaticEntry(d)) {
+      d.__entryBlocked = alreadyEntered || '缺少稳定报告编号或无法保存进入记录';
+      developerLog('协议进入跳过', { ...debugCandidate(entryData), reason: d.__entryBlocked });
+      return false;
+    }
+    entryData.__automaticEntryToken = d.__automaticEntryToken;
+    entryData.__automaticEntryKey = d.__automaticEntryKey;
     const startedAt = Date.now();
+    const requestId = `assert-${startedAt}-${Math.random().toString(36).slice(2, 9)}`;
     if (lifecycle) lifecycle.attemptCount = Number(lifecycle.attemptCount || 0) + 1;
-    developerLog('协议进入开始', { ...debugCandidate(entryData, { lifecycle: lifecycleDebug(lifecycle) }), reason: '校验允许进入' });
+    developerLog('协议进入开始', { ...debugCandidate(entryData, { lifecycle: lifecycleDebug(lifecycle) }), requestId, reason: '校验允许进入' });
     try {
+      const identityStartedAt = Date.now();
       await ensureSessionIdentity();
+      const identityWaitMs = Date.now() - identityStartedAt;
+      if (!isAutoOpenEnabled() || !isMonitorRoute() || entryDiagnosisLockActive()) return false;
       const url = `/api/ct/rays/rep/assertAllowEnter?repUid=${encodeURIComponent(String(repUid))}`;
-      const { response, payload } = await fetchJson(url, { method: 'GET', credentials: 'include', headers: { Accept: 'application/json' } }, 4500);
+      const { response, payload, timing } = await fetchJson(url, { __requestId: requestId, __identityWaitMs: identityWaitMs, method: 'GET', credentials: 'include', headers: { Accept: 'application/json' } }, 4500);
+      if (!isAutoOpenEnabled() || !isMonitorRoute() || entryDiagnosisLockActive()) {
+        developerLog('协议进入取消', { ...debugCandidate(entryData), reason: '自动进入已关闭、时段到期或当前入口不可用', durationMs: Date.now() - startedAt });
+        return false;
+      }
       const serverMessage = norm(payload?.message);
-      const lockedMessage = /锁定|占用|其他用户|诊断中|审核中/.test(serverMessage);
+      const serverBlock = protocolEntryBlockReason(payload);
+      const lockedMessage = serverBlock === '报告已锁定/占用';
       const protocolAllowed = protocolAllowsEntry(payload);
-      if (!response.ok || payload?.code !== 200 || !protocolAllowed) {
+      if (!response.ok || payload?.code !== 200 || serverBlock || !protocolAllowed) {
         console.warn('[自动诊断] 系统不允许进入诊断', { code: payload?.code, message: payload?.message });
-        const rejectReason = lockedMessage ? '报告已锁定/占用' : '业务校验拒绝';
-        if (lockedMessage || (response.ok && payload?.code === 200 && payload?.data !== undefined && !protocolAllowed)) d.__entryBlocked = lockedMessage ? '报告已锁定/占用' : '业务校验未允许';
+        const rejectReason = serverBlock || '业务校验拒绝';
+        if (serverBlock || (response.ok && payload?.code === 200 && payload?.data !== undefined && !protocolAllowed)) d.__entryBlocked = serverBlock || '业务校验未允许';
         const serverData = lockedMessage ? { ...entryData, status: serverMessage || entryData.status, locked: true } : entryData;
         const serverLifecycle = observeCandidateLifecycle(serverData, 'assertAllowEnter', {
           eligible: false,
@@ -1341,6 +2080,7 @@
         });
         developerLog('协议进入拒绝', {
           ...debugCandidate(entryData, { lifecycle: lifecycleDebug(serverLifecycle || lifecycle) }),
+          requestId, ...timing,
           code: payload?.code ?? null,
           httpStatus: response.status ?? null,
           reason: rejectReason,
@@ -1351,28 +2091,79 @@
         }, { force: lockedMessage });
         return false;
       }
+      // 等待服务端校验时页面可能已更新为其他用户占用；导航前再读一次当前行。
+      const currentPageBlock = pageEntryBlockReason(d);
+      const currentRecordView = recordData(record);
+      const duplicateBlock = automaticEntryBlockReason(d);
+      const excludedBlock = isExcludedExam(currentRecordView || entryData) || isExcludedExam(d) ? '检查项目排除' : '';
+      if (duplicateBlock || excludedBlock || currentPageBlock || shouldSkipLocked(d) || !isPendingReport(currentRecordView || entryData)) {
+        d.__entryBlocked = duplicateBlock || excludedBlock || currentPageBlock || (shouldSkipLocked(d) || shouldSkipLocked(currentRecordView) ? '报告已锁定/占用' : '报告状态非待诊断');
+        developerLog('协议进入取消', { ...debugCandidate(entryData), reason: d.__entryBlocked, durationMs: Date.now() - startedAt });
+        return false;
+      }
       const applyOrgCode = record?.applyOrgCode || record?.applyOrg || d?.row?.dataset?.applyOrgCode || '';
       const query = new URLSearchParams({ id: String(repUid) });
       if (applyOrgCode) query.set('applyOrgCode', String(applyOrgCode));
       console.info('[自动诊断] 协议校验通过，打开诊断页', { hasReportId: true });
-      developerLog('协议进入成功', { ...debugCandidate(entryData, { lifecycle: lifecycleDebug(lifecycle) }), durationMs: Date.now() - startedAt });
+      developerLog('协议进入成功', { ...debugCandidate(entryData, { lifecycle: lifecycleDebug(lifecycle) }), requestId, ...timing, phase: 'assert-allowed', finalReportLoaded: false, durationMs: Date.now() - startedAt });
       // 直接使用业务路由，诊断页会按系统原流程继续获取并锁定记录。
       diagnosisActive = true;
-      pageWindow().location.href = `/radiation/report?${query.toString()}`;
-      return true;
+      beginFinalEntryPending(repUid, 'protocol');
+      finalEntryPending.entryKey = d.__automaticEntryKey;
+      finalEntryPending.entryToken = d.__automaticEntryToken;
+      persistFinalEntryPending();
+      if (!consumeAutomaticEntry(d, 'automatic-navigation')) {
+        finishFinalEntryPending('entry-not-durable', String(repUid), { finalReportLoaded: false });
+        return false;
+      }
+      const navigated = await navigateToDiagnosisReport(`/radiation/report?${query.toString()}`, repUid, d);
+      if (!navigated) d.__entryBlocked = '页面导航已取消';
+      return navigated;
     } catch (e) {
       console.warn('[自动诊断] 协议进入失败，将尝试页面按钮', { error: String(e) });
+      releaseAutomaticEntry(d, 'protocol-exception');
+      if (finishFinalEntryPending('navigation-error', String(repUid), { error: debugError(e), finalReportLoaded: false })) diagnosisActive = false;
       developerLog('协议进入异常', { ...debugCandidate(entryData, { lifecycle: lifecycleDebug(lifecycle) }), error: debugError(e), durationMs: Date.now() - startedAt });
       return false;
+    } finally {
+      // Only pre-navigation reservations are released here. A dispatched
+      // navigation remains consumed until a matching native failure is observed.
+      if (readAutomaticEntry(d.__automaticEntryKey)?.state === 'reserved') releaseAutomaticEntry(d, 'protocol-not-dispatched');
     }
   }
 
-  function protocolAllowsEntry(payload) {
+  function pageEntryBlockReason(d) {
+    if (!d?.row) return '';
+    const current = rowData(d.row);
+    if (shouldSkipLocked(current)) return '报告已锁定/占用';
+    if (!isPendingReport(current)) return '报告状态非待诊断';
+    if (!diagnoseOperator(d.row)) return '诊断操作不可用/已禁用';
+    return '';
+  }
+
+  function protocolEntryBlockReason(payload) {
     const data = payload?.data;
-    if (!data) return false;
-    if (typeof data !== 'object') return !!data;
+    const records = data && typeof data === 'object' && !Array.isArray(data) ? [data, data.record, data.report, data.reportInfo].filter(value => value && typeof value === 'object') : [];
+    const messages = [payload?.message, payload?.msg, ...records.flatMap(value => [value.message, value.msg, value.lockReason])].map(norm);
+    if (messages.some(value => /锁定|占用|其他用户|诊断中|审核中/.test(value) && !/^(?:未锁定|未占用|unlocked|not locked)$/i.test(value))) return '报告已锁定/占用';
+    if (records.some(record => recordLockState(record))) return '报告已锁定/占用';
+    for (const record of records) {
+      const statusCode = norm(record.reportStatusCode || record.checkStatusCode || record.statusCode);
+      const status = norm(record.reportStatus || record.reportStatusName || record.checkStatusName || record.status);
+      if (/锁定|占用/.test(status) && !/未锁定|未占用/.test(status)) return '报告已锁定/占用';
+      if ((statusCode && statusCode !== norm(config.pendingStatusValue || '102501')) || /诊断中|待审核|审核中|已审核|已打印/.test(status)) return '报告状态非待诊断';
+    }
+    return '';
+  }
+
+  function protocolAllowsEntry(payload) {
+    if (payload?.code !== 200 || protocolEntryBlockReason(payload)) return false;
+    const data = payload?.data;
+    const allowed = value => value === true || value === 1 || (typeof value === 'string' && ['true', '1'].includes(value.trim().toLowerCase()));
+    if (typeof data !== 'object' || data === null) return allowed(data);
+    if (Array.isArray(data)) return false;
     const flags = ['allow', 'allowed', 'canEnter', 'isAllow', 'success', 'pass'].filter(key => data[key] !== undefined);
-    return !flags.length || flags.some(key => data[key] === true || data[key] === 1 || String(data[key]).toLowerCase() === 'true');
+    return flags.length > 0 && flags.every(key => allowed(data[key]));
   }
 
   async function enterDiagnosis(d) {
@@ -1381,16 +2172,31 @@
       return false;
     }
     if (entryRunning || entryDiagnosisLockActive() || !isMonitorRoute()) return false;
+    if (isExcludedExam(d)) {
+      d.__entryBlocked = '检查项目排除';
+      developerLog('进入前硬门禁拒绝', { ...debugCandidate(d), reason: d.__entryBlocked });
+      return false;
+    }
+    const duplicateBlock = automaticEntryBlockReason(d);
+    if (duplicateBlock) {
+      d.__entryBlocked = duplicateBlock;
+      developerLog('进入前硬门禁拒绝', { ...debugCandidate(d), reason: duplicateBlock });
+      return false;
+    }
     if (d?.__entryBlocked) {
       developerLog('进入前硬门禁拒绝', { ...debugCandidate(d), reason: d.__entryBlocked });
       return false;
     }
-    if (shouldSkipLocked(d) || (!isPendingReport(d) && !d?.__realtimeNeedsServerStatus)) {
+    if (!isPendingReport(d)) {
       developerLog('进入前硬门禁拒绝', { ...debugCandidate(d), reason: shouldSkipLocked(d) ? '报告已锁定/占用' : '报告状态非待诊断' });
       return false;
     }
     entryRunning = true;
     try {
+      await waitBeforeEntry();
+      if (!isAutoOpenEnabled() || !isMonitorRoute() || entryDiagnosisLockActive()) return false;
+      if (isExcludedExam(d)) { d.__entryBlocked = '检查项目排除'; return false; }
+      if (automaticEntryBlockReason(d)) return false;
       if (config.entryMode !== 'click') {
         const entered = await protocolEnter(d);
         if (entered || config.entryMode === 'protocol-only' || d?.__entryBlocked) return entered;
@@ -1424,11 +2230,10 @@
     return JSON.stringify(Object.keys(data).sort().reduce((out, key) => { out[key] = data[key]; return out; }, {}));
   }
   function dataKeys(d) {
-    return [...new Set([
-      d?.key,
-      d?.record?.repUid != null ? `rep:${d.record.repUid}` : '',
-      d?.applicationNo ? `apply:${norm(d.applicationNo)}` : ''
-    ].filter(Boolean))];
+    const reportKey = automaticEntryKey(d);
+    // A report UID is the identity. Sharing an application or a patient name
+    // must not merge two independent checks into one handled candidate.
+    return reportKey ? [reportKey] : [d?.key].filter(Boolean);
   }
   function candidatePatientName(d) {
     const explicit = norm(d?.patientName || d?.record?.patName || d?.record?.patientName);
@@ -1437,7 +2242,116 @@
       .replace(/(门诊|急诊|住院|体检).*$/, '')
       .replace(/(?:男|女)?\d{1,3}岁$/, '');
   }
-  function dataSeen(d) { return dataKeys(d).some(key => seen.has(key)); }
+  const AUTOMATIC_ENTRY_PREFIX = 'jx-radiation-auto-entry-once-v1:';
+  const AUTOMATIC_ENTRY_RESERVATION_MS = 30000;
+  const automaticEntryCache = new Map();
+  let automaticEntrySequence = 0;
+
+  function automaticEntryKey(d) {
+    if (!d) return '';
+    let record = d.record;
+    if (!record && d.row) {
+      try { record = findRowRecord(d); if (record) d.record = record; } catch (_) {}
+    }
+    const repUid = record?.repUid || record?.reportUid || record?.reportId || record?.id ||
+      (String(d.key || '').startsWith('rep:') ? String(d.key).slice(4) : '') ||
+      d.repUid || d.recordId || d.row?.dataset?.repUid;
+    const value = String(repUid || '').trim();
+    return value && value.length <= 96 && !/[\u0000-\u0020\u007f]/.test(value) ? `rep:${value}` : '';
+  }
+  function automaticEntryStorageKey(key) { return AUTOMATIC_ENTRY_PREFIX + encodeURIComponent(key); }
+  function readAutomaticEntry(key) {
+    if (!key) return null;
+    const storageKey = automaticEntryStorageKey(key), copies = [automaticEntryCache.get(key)];
+    try { copies.push(decodeDeveloperStorage(GM_getValue(storageKey, null))); } catch (_) {}
+    try { copies.push(decodeDeveloperStorage(developerLocalStorage()?.getItem(storageKey))); } catch (_) {}
+    const entries = copies.filter(value => value?.schema === 1 && value.key === key &&
+      ['reserved', 'consumed', 'released'].includes(value.state) && Number.isFinite(value.updatedAt));
+    // A confirmed native success can never be erased by an old page releasing
+    // its earlier reservation, delayed storage transport or a debug clear.
+    const confirmed = entries.filter(value => value.state === 'consumed' && value.confirmed === true);
+    const selected = (confirmed.length ? confirmed : entries).sort((a, b) => b.updatedAt - a.updatedAt ||
+      (b.state === 'consumed' ? 1 : 0) - (a.state === 'consumed' ? 1 : 0))[0] || null;
+    if (selected) automaticEntryCache.set(key, selected);
+    return selected;
+  }
+  function writeAutomaticEntry(key, value) {
+    const entry = { schema: 1, key, ...value }, storageKey = automaticEntryStorageKey(key);
+    automaticEntryCache.set(key, entry);
+    let durable = false;
+    try { const storage = developerLocalStorage(); if (storage) { storage.setItem(storageKey, JSON.stringify(entry)); durable = true; } } catch (_) {}
+    try { GM_setValue(storageKey, entry); durable = true; } catch (_) {}
+    return durable;
+  }
+  function automaticEntryBlockReason(d) {
+    const key = automaticEntryKey(d), entry = readAutomaticEntry(key);
+    if (entry?.state === 'consumed') return '本检查报告已进入过，不再自动进入';
+    if (entry?.state === 'reserved' && entry.expiresAt > Date.now() && entry.token !== d?.__automaticEntryToken) return '本检查报告正在进入';
+    return '';
+  }
+  function reserveAutomaticEntry(d) {
+    const key = automaticEntryKey(d);
+    if (!key) return false;
+    if (automaticEntryBlockReason(d)) return false;
+    const current = readAutomaticEntry(key);
+    if (current?.state === 'reserved' && current.token === d.__automaticEntryToken && current.expiresAt > Date.now()) return true;
+    const token = `${debugWriterId}:entry:${++automaticEntrySequence}`;
+    const now = Date.now();
+    if (!writeAutomaticEntry(key, { state: 'reserved', token, startedAt: now, updatedAt: Math.max(now, Number(current?.updatedAt || 0) + 1), expiresAt: now + AUTOMATIC_ENTRY_RESERVATION_MS, confirmed: false })) return false;
+    d.__automaticEntryToken = token;
+    d.__automaticEntryKey = key;
+    return readAutomaticEntry(key)?.token === token;
+  }
+  function consumeAutomaticEntry(d, reason, confirmed = false) {
+    const key = automaticEntryKey(d);
+    if (!key) return false;
+    const current = readAutomaticEntry(key);
+    if (current?.state === 'consumed' && current.confirmed) return true;
+    if (!confirmed && current?.token !== d?.__automaticEntryToken) return false;
+    const now = Date.now();
+    return writeAutomaticEntry(key, { state: 'consumed', token: current?.token || d.__automaticEntryToken || '',
+      startedAt: current?.startedAt || now, updatedAt: Math.max(now, Number(current?.updatedAt || 0) + 1),
+      confirmed, reason, expiresAt: 0 });
+  }
+  function releaseAutomaticEntry(d, reason) {
+    const key = d?.__automaticEntryKey || automaticEntryKey(d), current = readAutomaticEntry(key);
+    if (!key || !current || current.confirmed || current.token !== d?.__automaticEntryToken || current.state === 'released') return false;
+    const now = Date.now();
+    return writeAutomaticEntry(key, { ...current, state: 'released', reason, updatedAt: Math.max(now, Number(current.updatedAt) + 1), expiresAt: 0 });
+  }
+  function restoreAutomaticEntryHistory() {
+    const ownName = norm(loginIdentity().name);
+    let restored = 0;
+    for (const event of debugEvents) {
+      const key = automaticEntryKey({ key: event.key, recordId: event.recordId, record: event.record });
+      const at = Date.parse(event.at);
+      if (!key || !Number.isFinite(at)) continue;
+      const previous = readAutomaticEntry(key);
+      if (event.event === '报告进入拒绝' && event.requestMethod === 'POST' &&
+          previous?.reason === 'retained-entry-history' && !previous.confirmed && previous.updatedAt <= at) {
+        writeAutomaticEntry(key, { ...previous, state: 'released', updatedAt: at, reason: 'retained-native-failure' });
+        continue;
+      }
+      const automatic = ['候选进入成功', '实时推送进入成功', '诊断路由导航'].includes(event.event);
+      const native = event.event === '报告进入完成' && event.finalReportLoaded === true &&
+        event.requestMethod === 'POST' && event.endpointKind === 'radiation-entry' &&
+        event.route === '/radiation/report' && event.responseRoute === '/radiation/report' &&
+        String(event.routeReportId || '') === String(event.recordId || '') &&
+        String(event.responseRouteReportId || '') === String(event.recordId || '') && ownName &&
+        event.reportDoctor && accountValueMatches(ownName, norm(event.reportDoctor));
+      if (!automatic && !native) continue;
+      if (!key || readAutomaticEntry(key)?.confirmed) continue;
+      const current = readAutomaticEntry(key);
+      if (current && current.updatedAt >= at && !native) continue;
+      if (writeAutomaticEntry(key, { state: 'consumed', token: 'retained-entry-history',
+        startedAt: at, updatedAt: at, expiresAt: 0, confirmed: !!native, reason: 'retained-entry-history' })) restored++;
+    }
+    if (restored) developerLog('已恢复进入一次记录', { count: restored, source: 'retained-local-history' }, { force: true });
+  }
+  function dataSeen(d) {
+    const key = automaticEntryKey(d);
+    return key ? !!automaticEntryBlockReason(d) : dataKeys(d).some(value => seen.has(value));
+  }
   function rememberData(d) {
     for (const key of dataKeys(d)) seen.set(key, Date.now());
     while (seen.size > Number(config.seenLimit || 500)) seen.delete(seen.keys().next().value);
@@ -1480,7 +2394,7 @@
   }
 
   function pruneCandidateLifecycle(now = Date.now()) {
-    const cutoff = now - DEBUG_RETENTION_MS;
+    const cutoff = now - developerRetentionMs();
     for (const [key, state] of candidateLifecycle) {
       if (!state || state.lastSeenAt < cutoff) candidateLifecycle.delete(key);
     }
@@ -1564,7 +2478,7 @@
     if (!options.complete) return;
     for (const state of candidateLifecycle.values()) {
       if (state.lastSnapshotSequence === snapshotSequence || !state.eligibleAt || currentKeys.has(state.key)) continue;
-      if (now - state.lastSeenAt > DEBUG_RETENTION_MS) continue;
+      if (now - state.lastSeenAt > developerRetentionMs()) continue;
       const disappearedAt = now;
       developerLog('候选未在后续列表出现', {
         source,
@@ -1648,6 +2562,7 @@
           source: options.reason || 'list',
           dispatchDelayMs: Math.max(0, now - Number(options.hintAt) || 0),
           withinOneSecond: now - Number(options.hintAt) <= 1000,
+          phase: 'scheduler-start', networkSent: false,
           candidateTag: debugTag(match),
           diagnosisActive,
           entryRunning
@@ -1771,8 +2686,19 @@
           d.status || d.statusCode || d.record?.reportStatus || d.record?.reportStatusName ||
           d.record?.reportStatusCode || d.record?.checkStatusName || d.record?.checkStatusCode
         );
+        // WebSocket 的 reportInfo 线索经常只有 repUid、姓名、年龄和检查名称，
+        // modality/报告状态会在随后列表接口中补全。不能在补全前把它当作
+        // “检查类型不匹配”直接淘汰，否则窄列表稍有延迟就会丢掉实时候选。
+        const modalityUnknown = !!recordId && d && !norm(
+          d.modality || d.record?.modality || d.record?.checkModality || d.record?.patSource
+        );
+        const examUnknown = !!recordId && d && !norm(
+          d.exam || d.examName || d.record?.examName || d.record?.exam
+        );
         const failedRules = d ? matchFailureReasons(d).filter(reason =>
-          !statusUnknown || !['报告状态非待诊断', '报告状态'].includes(reason)
+          (!statusUnknown || !['报告状态非待诊断', '报告状态'].includes(reason)) &&
+          (!modalityUnknown || reason !== '检查类型') &&
+          (!examUnknown || reason !== '检查项目')
         ) : [];
         const lifecycle = d ? observeCandidateLifecycle(d, 'websocket', {
           failedRules,
@@ -1781,11 +2707,13 @@
           snapshotSequence: candidateSnapshotSequence
         }) : null;
         if (statusUnknown) d.__realtimeNeedsServerStatus = true;
+        if (modalityUnknown || examUnknown) d.__realtimeNeedsServerEnrichment = true;
         if (seenAlready) developerLog('候选跳过', { ...debugCandidate(d, { source: 'websocket', lifecycle: lifecycleDebug(lifecycle) }), reason: '已处理' });
         else if (d && failedRules.length) developerLog('候选过滤', { ...debugCandidate(d, { source: 'websocket', lifecycle: lifecycleDebug(lifecycle) }), reason: '规则不匹配', failedRules });
         else if (d && !recordId) developerLog('实时推送降级', { ...debugCandidate(d, { source: 'websocket' }), reason: '线索没有记录编号' });
         let entrySkippedByObservation = false;
-        if (d && !seenAlready && !failedRules.length && recordId) {
+        const needsServerEnrichment = !!(d && (d.__realtimeNeedsServerStatus || d.__realtimeNeedsServerEnrichment));
+        if (d && !seenAlready && !failedRules.length && recordId && !needsServerEnrichment) {
           developerLog(isAutoOpenEnabled() ? '实时推送直接协议校验' : '实时推送候选观察', { ...debugCandidate(d, { source: 'websocket', lifecycle: lifecycleDebug(lifecycle) }), serverStatusCheck: statusUnknown, autoOpenEnabled: isAutoOpenEnabled() });
           if (!isAutoOpenEnabled()) {
             entrySkippedByObservation = true;
@@ -1801,6 +2729,14 @@
             if (lifecycle) lifecycle.attemptCount = Number(lifecycle.attemptCount || 0) + 1;
             developerLog('候选进入失败', { ...debugCandidate(d, { source: 'websocket', lifecycle: lifecycleDebug(lifecycle) }), reason: '协议入口失败，等待窄列表兜底', waitMs: lifecycle?.eligibleAt ? Date.now() - lifecycle.eligibleAt : null });
           }
+        } else if (d && !seenAlready && !failedRules.length && recordId && needsServerEnrichment) {
+          developerLog('实时推送等待协议补全', {
+            ...debugCandidate(d, { source: 'websocket', lifecycle: lifecycleDebug(lifecycle) }),
+            reason: '线索缺少检查类型或报告状态，先取窄列表再判定',
+            statusUnknown,
+            modalityUnknown,
+            examUnknown
+          });
         }
       } catch (e) {
         console.debug('[自动诊断] 实时提示处理失败，转入列表兜底', String(e));
@@ -1813,6 +2749,269 @@
     // 不再从第一页的全量候选中盲目扫描。
     if (!entered) queueRealtimeRefresh({ match: d, hintAt: lastRealtimeHintAt });
     else developerLog('实时推送进入成功', { ...debugCandidate(d), source: 'websocket' });
+  }
+
+  // 仅旁听报告页自己的最终进入请求；不发起请求、不复制请求头，也不改写响应。
+  // assertAllowEnter 通过只是允许打开，真正载入/锁定发生在原生 rep/enter。
+  const REPORT_ENTRY_EVENT = 'jx-auto-diagnose-report-entry-observed';
+  let reportEntryBridgeBound = false;
+  function installReportEntryPageObserver(page, eventName, maxBytes = 1048576) {
+    if (!page || page.__JX_AUTO_DIAGNOSE_REPORT_ENTRY_BRIDGE__) return;
+    const cap = Math.max(1, Math.min(1048576, Number(maxBytes) || 1048576));
+    const xhrRequests = new WeakMap();
+    let serial = 0;
+    const text = (value, length = 160) => typeof value === 'string' || typeof value === 'number' ? String(value).slice(0, length) : '';
+    const routeIdentity = () => {
+      try {
+        const url = new URL(page.location.href);
+        return { route: url.pathname, routeReportId: text(url.searchParams.get('id'), 96) };
+      } catch (_) { return { route: '', routeReportId: '' }; }
+    };
+    const metadata = (url, method, body, transport) => {
+      try {
+        const target = new URL(typeof url === 'string' ? url : url?.url || '', page.location.href);
+        if (target.origin !== page.location.origin) return null;
+        const requestMethod = String(method || 'GET').toUpperCase();
+        // The native API has both getReportDetail (GET/id/boolean) and
+        // getRadiationDetail (POST). Observe each exact shape, never a prefix.
+        const detailMatch = target.pathname.match(/^\/api\/ct\/rays\/rep\/enter\/([^/]{1,288})\/(true|false)$/);
+        const postEnter = requestMethod === 'POST' && target.pathname === '/api/ct/rays/rep/enter';
+        const getEnter = requestMethod === 'GET' && !!detailMatch;
+        if (!postEnter && !getEnter) return null;
+        const route = routeIdentity();
+        // getReportDetail is also used by other modules. Only watch it while
+        // an identified radiation report is open; it is not a lock assertion.
+        if (getEnter && (route.route !== '/radiation/report' || !route.routeReportId)) return null;
+        let repUid = route.routeReportId;
+        if (getEnter) {
+          repUid = decodeURIComponent(detailMatch[1]);
+          if (!repUid || repUid.length > 96 || /[/\\\u0000-\u0020\u007f]/.test(repUid)) return null;
+        }
+        // Native Axios sends a small JSON body. Read only repUid, never headers.
+        if (postEnter && typeof body === 'string' && body.length <= 4096) {
+          try { repUid = text(JSON.parse(body)?.repUid, 96) || repUid; } catch (_) {}
+        }
+        return { requestId: `native-enter:${Date.now()}:${++serial}`, transport, requestMethod, endpointKind: getEnter ? 'report-detail' : 'radiation-entry', repUid, ...route, startedAt: Date.now() };
+      } catch (_) { return null; }
+    };
+    const publish = (meta, outcome, extra = {}) => {
+      try {
+        const current = routeIdentity();
+        const detail = {
+          ...meta, ...extra, outcome, phase: 'report-enter', durationMs: Date.now() - meta.startedAt,
+          responseRoute: current.route, responseRouteReportId: current.routeReportId
+        };
+        page.dispatchEvent(new page.CustomEvent(eventName, { detail: JSON.stringify(detail) }));
+      } catch (_) {}
+    };
+    const result = (meta, payload, httpStatus) => {
+      const data = payload?.data;
+      const report = data && typeof data === 'object' && !Array.isArray(data) ? data : {};
+      const responseRepUid = text(report.repUid || report.reportUid || report.reportId || report.id, 96);
+      const allowed = httpStatus >= 200 && httpStatus < 300 && payload?.code === 200 && !!data;
+      publish(meta, allowed ? 'complete' : 'rejected', {
+        httpStatus, code: typeof payload?.code === 'number' || typeof payload?.code === 'string' ? payload.code : null,
+        message: text(payload?.message, 240), responseRepUid,
+        reportIdMatches: !responseRepUid || !meta.repUid || responseRepUid === meta.repUid,
+        patientName: text(report.patName || report.patientName), status: text(report.reportStatus || report.reportStatusName),
+        statusCode: text(report.reportStatusCode || report.statusCode, 40),
+        reportDoctor: text(report.reportDoc), lockUserName: text(report.lockUserName || report.lockUser),
+        modality: text(report.modality, 40), title: text(report.examName || report.reportTitle || report.title),
+        responseDataShape: data == null ? 'none' : Array.isArray(data) ? 'array' : typeof data
+      });
+    };
+    const parseText = (meta, responseText, httpStatus) => {
+      if (typeof responseText !== 'string' || responseText.length > cap || new TextEncoder().encode(responseText).byteLength > cap) {
+        publish(meta, 'error', { httpStatus, error: 'response-too-large-or-unreadable' });
+        return;
+      }
+      try { result(meta, JSON.parse(responseText), httpStatus); }
+      catch (_) { publish(meta, 'error', { httpStatus, error: 'response-json-invalid' }); }
+    };
+    const inspectFetch = async (response, meta) => {
+      const httpStatus = Number(response.status) || 0;
+      let reader;
+      try {
+        const length = Number(response.headers?.get('content-length'));
+        if (Number.isFinite(length) && length > cap) {
+          publish(meta, 'error', { httpStatus, error: 'response-too-large' }); return;
+        }
+        const clone = response.clone();
+        if (!clone.body?.getReader) {
+          // Without a streaming reader only a declared, bounded response is safe.
+          if (!(length > 0 && length <= cap)) {
+            publish(meta, 'error', { httpStatus, error: 'response-reader-unavailable' }); return;
+          }
+          parseText(meta, await clone.text(), httpStatus); return;
+        }
+        reader = clone.body.getReader();
+        const decoder = new TextDecoder();
+        let size = 0, body = '';
+        while (true) {
+          const chunk = await reader.read();
+          if (chunk.done) break;
+          size += chunk.value.byteLength;
+          if (size > cap) {
+            // Cancel only the clone branch; the application's original is untouched.
+            Promise.resolve(reader.cancel()).catch(() => {});
+            publish(meta, 'error', { httpStatus, error: 'response-too-large' }); return;
+          }
+          body += decoder.decode(chunk.value, { stream: true });
+        }
+        body += decoder.decode();
+        parseText(meta, body, httpStatus);
+      } catch (error) {
+        publish(meta, 'error', { httpStatus, error: 'response-read-failed', errorClass: text(error?.name, 60) });
+      } finally { try { reader?.releaseLock(); } catch (_) {} }
+    };
+    let installed = false;
+    if (typeof page.fetch === 'function') {
+      const nativeFetch = page.fetch;
+      page.fetch = function () {
+        const [input, options] = arguments;
+        const meta = metadata(input, options?.method || input?.method || 'GET', options?.body, 'fetch');
+        let promise;
+        try { promise = nativeFetch.apply(this, arguments); }
+        catch (error) {
+          if (meta) Promise.resolve().then(() => publish(meta, 'error', { httpStatus: 0, error: 'request-threw', errorClass: text(error?.name, 60) }));
+          throw error;
+        }
+        if (meta) promise.then(
+          response => { inspectFetch(response, meta).catch(() => {}); },
+          error => { publish(meta, 'error', { httpStatus: 0, error: 'request-rejected', errorClass: text(error?.name, 60) }); }
+        );
+        // Preserve native promise identity, timing and rejection for the caller.
+        return promise;
+      };
+      installed = true;
+    }
+    const prototype = page.XMLHttpRequest?.prototype;
+    if (prototype && typeof prototype.open === 'function' && typeof prototype.send === 'function') {
+      const nativeOpen = prototype.open, nativeSend = prototype.send;
+      prototype.open = function (method, url) {
+        const value = nativeOpen.apply(this, arguments);
+        xhrRequests.delete(this);
+        const meta = metadata(url, method, null, 'xhr');
+        if (meta) xhrRequests.set(this, meta);
+        return value;
+      };
+      prototype.send = function (body) {
+        const meta = xhrRequests.get(this);
+        if (!meta) return nativeSend.apply(this, arguments);
+        if (meta.requestMethod === 'POST' && typeof body === 'string' && body.length <= 4096) {
+          try { meta.repUid = text(JSON.parse(body)?.repUid, 96) || meta.repUid; } catch (_) {}
+        }
+        meta.startedAt = Date.now();
+        let finished = false;
+        const cleanup = () => {
+          for (const name of ['load', 'error', 'abort', 'timeout']) this.removeEventListener(name, finish);
+        };
+        const finish = event => {
+          if (finished) return;
+          finished = true; cleanup();
+          const httpStatus = Number(this.status) || 0;
+          if (event.type !== 'load') {
+            Promise.resolve().then(() => publish(meta, 'error', { httpStatus, error: `request-${event.type}` })); return;
+          }
+          try {
+            // Snapshot completed native values before an application reuses the XHR.
+            const type = this.responseType;
+            const payload = type === 'json' ? this.response : null;
+            const responseText = !type || type === 'text' ? this.responseText : null;
+            Promise.resolve().then(() => type === 'json' ? result(meta, payload, httpStatus) : parseText(meta, responseText, httpStatus)).catch(() => {});
+          } catch (_) {
+            Promise.resolve().then(() => publish(meta, 'error', { httpStatus, error: 'response-read-failed' }));
+          }
+        };
+        for (const name of ['load', 'error', 'abort', 'timeout']) this.addEventListener(name, finish);
+        try { return nativeSend.apply(this, arguments); }
+        catch (error) {
+          if (!finished) {
+            finished = true; cleanup();
+            Promise.resolve().then(() => publish(meta, 'error', { httpStatus: 0, error: 'request-threw', errorClass: text(error?.name, 60) }));
+          }
+          throw error;
+        }
+      };
+      installed = true;
+    }
+    if (installed) {
+      page.__JX_AUTO_DIAGNOSE_REPORT_ENTRY_BRIDGE__ = true;
+      page.__JX_AUTO_DIAGNOSE_REPORT_ENTRY_PROTOCOLS__ = Object.freeze(['POST-enter', 'GET-report-detail']);
+    }
+  }
+
+  function onReportEntryObserved(event) {
+    let detail = event?.detail;
+    if (typeof detail !== 'string' || detail.length > 6000) return;
+    try { detail = JSON.parse(detail); } catch (_) { return; }
+    if (!['complete', 'rejected', 'error'].includes(detail?.outcome) || detail.phase !== 'report-enter') return;
+    const bounded = (value, max = 160) => typeof value === 'string' || typeof value === 'number' ? String(value).slice(0, max) : '';
+    const repUid = bounded(detail.repUid || detail.routeReportId || detail.responseRepUid, 96);
+    const endpointKind = detail.endpointKind === 'report-detail' ? 'report-detail' : 'radiation-entry';
+    const matchesCurrentReport = !!repUid && detail.route === '/radiation/report' && detail.responseRoute === '/radiation/report' &&
+      bounded(detail.routeReportId, 96) === repUid && bounded(detail.responseRouteReportId, 96) === repUid && detail.reportIdMatches !== false;
+    const record = {
+      key: repUid ? `rep:${repUid}` : '', recordId: repUid,
+      patientName: bounded(detail.patientName), status: bounded(detail.status), statusCode: bounded(detail.statusCode, 40),
+      reportDoctor: bounded(detail.reportDoctor), lockUserName: bounded(detail.lockUserName),
+      modality: bounded(detail.modality, 40), title: bounded(detail.title), source: 'native-report-enter', phase: 'report-enter',
+      requestId: bounded(detail.requestId, 96), transport: bounded(detail.transport, 16), requestMethod: bounded(detail.requestMethod, 8), endpointKind,
+      httpStatus: Number(detail.httpStatus) || 0, code: typeof detail.code === 'number' ? detail.code : bounded(detail.code, 40) || null,
+      serverMessage: bounded(detail.message, 240), error: bounded(detail.error, 80), errorClass: bounded(detail.errorClass, 60),
+      durationMs: Math.max(0, Number(detail.durationMs) || 0), responseRepUid: bounded(detail.responseRepUid, 96),
+      routeReportId: bounded(detail.routeReportId, 96), responseRouteReportId: bounded(detail.responseRouteReportId, 96),
+      route: bounded(detail.route, 80), responseRoute: bounded(detail.responseRoute, 80), reportIdMatches: detail.reportIdMatches !== false,
+      responseDataShape: bounded(detail.responseDataShape, 20), finalReportLoaded: detail.outcome === 'complete' && matchesCurrentReport
+    };
+    const label = endpointKind === 'report-detail' ? '报告详情读取' : '报告进入';
+    const name = `${label}${detail.outcome === 'complete' ? '完成' : detail.outcome === 'rejected' ? '拒绝' : '异常'}`;
+    developerLog(name, record, { force: true });
+    if (endpointKind === 'radiation-entry' && record.requestMethod === 'POST' && repUid) {
+      const pending = pendingFinalEntryState();
+      const startedAt = Number(detail.startedAt) || (Date.now() - record.durationMs);
+      const automaticAttempt = pending?.repUid === repUid && pending.entryKey && pending.entryToken && startedAt >= pending.startedAt;
+      const currentAccountName = norm(loginIdentity().name);
+      const ownerMatches = !!currentAccountName && !!record.reportDoctor && accountValueMatches(currentAccountName, norm(record.reportDoctor));
+      const explicitOwnerMismatch = !!currentAccountName && !!record.reportDoctor && !ownerMatches;
+      const enteredData = { key: `rep:${repUid}`, __automaticEntryKey: pending?.entryKey || `rep:${repUid}`, __automaticEntryToken: pending?.entryToken || '' };
+      if (detail.outcome === 'complete' && matchesCurrentReport && !explicitOwnerMismatch && (automaticAttempt || ownerMatches)) {
+        consumeAutomaticEntry(enteredData, automaticAttempt ? 'automatic-native-complete' : 'manual-native-complete', true);
+      } else if (automaticAttempt && detail.outcome === 'rejected') {
+        releaseAutomaticEntry(enteredData, `native-${detail.outcome}`);
+      }
+    }
+    if (endpointKind === 'radiation-entry' && detail.outcome === 'complete' && matchesCurrentReport && record.reportDoctor) {
+      const currentAccountName = norm(loginIdentity().name);
+      if (currentAccountName && !accountValueMatches(currentAccountName, record.reportDoctor)) {
+        developerLog('报告进入后所属医生不匹配', {
+          ...record, currentAccountName, reportOwnerMatches: false, reason: '最终进入响应的诊断医生与当前登录账号不同'
+        }, { force: true });
+      }
+    }
+    completeFinalEntryPending({ ...detail, repUid, endpointKind });
+  }
+
+  function installReportEntryBridge() {
+    if (reportEntryBridgeBound || pageWindow().location.host !== '10.10.94.90:22112') return;
+    reportEntryBridgeBound = true;
+    window.addEventListener(REPORT_ENTRY_EVENT, onReportEntryObserved);
+    const inject = () => {
+      const root = document.documentElement || document.head || document.body;
+      if (!root) return false;
+      try {
+        const script = document.createElement('script');
+        script.textContent = `(${installReportEntryPageObserver.toString()})(window,${JSON.stringify(REPORT_ENTRY_EVENT)})`;
+        root.appendChild(script); script.remove();
+        return true;
+      } catch (_) { return false; }
+    };
+    if (inject()) return;
+    // At document-start the root can be absent; install when it first appears,
+    // before waiting for DOMContentLoaded and the report component's mount.
+    const observer = new MutationObserver(() => { if (inject()) observer.disconnect(); });
+    observer.observe(document, { childList: true });
+    document.addEventListener('DOMContentLoaded', () => { inject(); observer.disconnect(); }, { once: true });
   }
 
   let realtimeBridgeBound = false;
@@ -2037,6 +3236,8 @@
   function start(options = {}) {
     if (!isMonitorRoute()) return;
     developerLog('运行版本', { source: 'runtime-start', version: SCRIPT_VERSION }, { force: true });
+    // 提前准备一次客户端地址；共享 Promise 和失败退避保证反复 start 不重复等待。
+    void ensureClientIp().catch(() => {});
     // 首次启动可以清空旧锁；从诊断页/设置页返回列表时保留锁，
     // 等列表行真正出现后由 entryDiagnosisLockActive 判断是否释放，
     // 防止表格尚未渲染时抢先进入第二位客户。
@@ -2047,6 +3248,7 @@
     if (realtimeRefreshTimer) clearTimeout(realtimeRefreshTimer);
     if (autoQueryFallbackTimer) clearTimeout(autoQueryFallbackTimer);
     if (pageQueryHeartbeatTimer) clearTimeout(pageQueryHeartbeatTimer);
+    scheduleAutoEntryScheduleExpiry();
     lastStatusHash = '';
     statusProbeFailures = 0;
     lastRealtimeHintAt = 0;
@@ -2055,6 +3257,11 @@
     developerLog('配置门禁快照', {
       source: 'runtime-start',
       autoOpenEnabled: isAutoOpenEnabled(),
+      autoEntrySchedule: {
+        slot: config.autoEntrySchedule?.slot || '',
+        date: config.autoEntrySchedule?.date || '',
+        state: autoEntryScheduleState().requiresSelection ? 'requires-selection' : autoEntryScheduleState().configured ? (autoEntryScheduleState().active ? 'active' : autoEntryScheduleState().pending ? 'pending' : 'expired') : 'unlimited'
+      },
       monitoringEnabled: isMonitoringEnabled(),
       observationOnly: isMonitoringEnabled() && !isAutoOpenEnabled(),
       encounterUnlimited: !(config.encounterTypes || []).length,
@@ -2065,14 +3272,16 @@
       encounterTypes: [...(config.encounterTypes || [])],
       modalities: [...(config.modalities || [])],
       examNames: [...(config.examNames || []), ...(config.examNamesExtra || [])],
+      examNamesExcluded: [...(config.examNamesExcluded || [])],
+      examExcludedCount: (config.examNamesExcluded || []).length,
       applyInstitution: [...(config.applyInstitution || [])],
       age: { min: config.age?.min ?? null, max: config.age?.max ?? null, unlimited: !!config.age?.unlimited },
       applicationTimeMode: config.applicationTime?.mode || 'all',
       applicationTime: { minMinutes: config.applicationTime?.minMinutes ?? null, maxMinutes: config.applicationTime?.maxMinutes ?? null, days: config.applicationTime?.days ?? null, start: config.applicationTime?.start || '' },
       checkOrgId: debugCredentialShape(currentCheckOrgId()),
       reportStatusCount: (config.reportStatuses || []).length,
-      skipLockedRecords: config.skipLockedRecords !== false,
-      lockedRecordPolicy: config.skipLockedRecords !== false ? '检测到其他用户锁定时跳过' : '允许尝试，交由服务端校验'
+      skipLockedRecords: true,
+      lockedRecordPolicy: '已锁定/占用报告始终禁止自动进入'
     }, { force: true });
     // 先以当前页面表格为基线，避免打开脚本时因为“不限时间”一次性抢走旧记录。
     lastListFetchAt = Date.now();
@@ -2124,9 +3333,10 @@
     checks.push(`路由：${path}`);
     const entryModeText = config.entryMode === 'click' ? '仅页面点击' : config.entryMode === 'protocol-only' ? '仅协议' : '协议优先';
     checks.push(`配置：自动打开${config.enabled ? '启用' : '停用'} / 只读监控${isMonitoringEnabled() ? '启用' : '停用'} / 进入方式 ${entryModeText}`);
+    checks.push(`自动进入时段：${autoEntryScheduleText()}`);
     if (config.entryMode === 'click') checks.push('页面点击模式：协议列表仍可观察，但仅自动打开启用时才允许点击诊断');
     checks.push(`页面行：${queryBodyRows().length}；账号门禁：${accountAllowed() ? '通过' : '未通过'}`);
-    checks.push(`开发者采集：${config.developerMode ? '开启' : '关闭'}；记录 ${debugEvents.length} 条；生命周期 ${candidateLifecycle.size} 个`);
+    checks.push(`开发者采集：${config.developerMode ? '开启' : '关闭'}；保留最近${developerRetentionLabel()}；记录 ${debugEvents.length} 条；生命周期 ${candidateLifecycle.size} 个`);
     checks.push(`权重：检查项目 ${parseWeights(config.examWeights).size} 项，机构 ${parseWeights(config.institutionWeights).size} 项`);
     checks.push(`年龄：${config.age?.unlimited ? '不限' : `${config.age?.min ?? ''}-${config.age?.max ?? ''}`}`);
     const updateSource = await checkUpdateSource();
@@ -2176,40 +3386,53 @@
       <div class="jx-panel-header" style="padding:12px 14px;background:linear-gradient(135deg,#409eff,#67c23a);color:white;display:flex;justify-content:space-between;align-items:center"><b style="font-size:15px">自动诊断设置</b><button type="button" data-a="close" aria-label="关闭设置" title="关闭设置" style="border:0;background:#ffffff33;color:white;border-radius:6px;padding:2px 10px;font-size:18px;line-height:1.25;cursor:pointer">×</button></div>
       <div class="jx-panel-content" style="padding:10px 14px;overflow:auto;min-height:0;flex:1 1 auto">
         <div style="display:flex;gap:6px;align-items:center;margin-bottom:9px"><select data-f="profile" style="flex:1;padding:5px"></select><button data-a="loadProfile">切换</button><input data-f="profileName" placeholder="方案名" style="width:90px;padding:5px"><button data-a="saveProfile">保存方案</button><button data-a="deleteProfile">删除</button></div>
-        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><label><input type="checkbox" data-f="enabled"> 启用自动打开</label><label><input type="checkbox" data-f="monitoringEnabled"> 开启只读监控</label><span style="color:#909399;font-size:12px">自动打开关闭时仍接收推送、读取列表并记录诊断信息，不会进入客户</span><label>本地扫描 <input data-f="pollMs" type="number" min="1000" step="500" style="width:70px"> ms</label><label>状态探测 <input data-f="statusProbeMs" type="number" min="3000" step="1000" style="width:70px"> ms</label><label>列表补偿 <input data-f="listHeartbeatMs" type="number" min="10000" step="1000" style="width:80px"> ms</label><label>操作延迟 <input data-f="clickDelayMs" type="number" min="0" style="width:60px"> ms</label><label>进入方式 <select data-f="entryMode" style="width:auto"><option value="protocol-first">协议优先（失败回退点击）</option><option value="protocol-only">仅协议</option><option value="click">页面点击</option></select></label><label><input type="checkbox" data-f="pageQueryRefresh"> 允许脚本点击查询</label></div>
+         <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><label><input type="checkbox" data-f="enabled"> 启用自动打开</label><label><input type="checkbox" data-f="monitoringEnabled"> 开启只读监控</label><span style="color:#909399;font-size:12px">自动打开关闭时仍接收推送、读取列表并记录诊断信息，不会进入客户</span><label>本地扫描 <input data-f="pollMs" type="number" min="1000" step="500" style="width:70px"> ms</label><label>状态探测 <input data-f="statusProbeMs" type="number" min="3000" step="1000" style="width:70px"> ms</label><label>列表补偿 <input data-f="listHeartbeatMs" type="number" min="10000" step="1000" style="width:80px"> ms</label><label>操作延迟 <input data-f="clickDelayMs" type="number" min="0" style="width:60px"> ms</label><label>进入等待 <input data-f="entryDelaySeconds" type="number" min="0" max="300" step="1" style="width:60px"> 秒</label><label>模拟人工 <select data-f="humanizeEntryLevel" style="width:auto"><option value="0">无（及时）</option><option value="1">轻微</option><option value="2">中等</option><option value="3">明显</option></select></label><label>进入方式 <select data-f="entryMode" style="width:auto"><option value="protocol-first">协议优先（失败回退点击）</option><option value="protocol-only">仅协议</option><option value="click">页面点击</option></select></label><label><input type="checkbox" data-f="pageQueryRefresh"> 允许脚本点击查询</label></div>
+         <fieldset><legend>自动进入时段</legend><div class="jx-time-slots" role="radiogroup" aria-label="自动进入时段"><label class="jx-time-slot"><input type="radio" name="jx-auto-entry-slot" data-f="autoEntryTimeSlot" value="morning"><span>08:00–12:00</span></label><label class="jx-time-slot"><input type="radio" name="jx-auto-entry-slot" data-f="autoEntryTimeSlot" value="noon"><span>12:00–14:30</span></label><label class="jx-time-slot"><input type="radio" name="jx-auto-entry-slot" data-f="autoEntryTimeSlot" value="afternoon"><span>14:30–17:30</span></label><label class="jx-time-slot"><input type="radio" name="jx-auto-entry-slot" data-f="autoEntryTimeSlot" value="night"><span>17:30–次日 08:00</span></label><button type="button" data-a="clearAutoEntryTimeSlot" title="清除当天自动进入时段">关闭并清除</button></div><small data-a="autoEntryTimeState" style="display:block;color:#909399;margin-top:4px">未选择时段时沿用自动进入开关，不限制时间。</small></fieldset>
+        <small style="display:block;color:#909399;margin:-3px 0 7px">进入等待为基础延迟；模拟人工会增加随机抖动。0 秒且选择“无（及时）”时不等待。</small>
         <small style="display:block;color:#909399;margin:-3px 0 7px">候选发现优先使用 WebSocket、状态计数和只读列表协议；默认每个列表补偿周期同步一次当前筛选条件下的可见表格，不会修改报告状态复选框。</small>
-        <fieldset><legend>开发者模式</legend><div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap"><label class="jx-dev-toggle"><input type="checkbox" data-f="developerMode"> 开启开发者模式</label><button type="button" data-a="selfCheck">运行自检</button><button type="button" data-a="copyDebug">复制最近诊断记录</button><button type="button" data-a="clearDebug">清空记录</button><span data-a="debugState" style="color:#909399">当前开启（最近10分钟）</span></div><small style="color:#909399">默认开启并自动保留最近10分钟完整调试记录，便于定位候选未及时进入；超过10分钟自动删除。自检只读当前页面、登录会话和状态协议，不修改报告状态。记录不保存 Cookie、Authorization 或密码。</small></fieldset>
+        <fieldset><legend>开发者模式</legend><div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap"><label class="jx-dev-toggle"><input type="checkbox" data-f="developerMode"> 开启开发者模式</label><button type="button" data-a="selfCheck">运行自检</button><button type="button" data-a="copyDebug">复制最近诊断记录</button><button type="button" data-a="clearDebug">清空记录</button><span data-a="debugState" style="color:#909399"></span></div><div class="jx-grid"><label>记录保留时长<select data-f="developerRetentionPreset" aria-label="记录保留时长"><option value="10">10 分钟</option><option value="30">30 分钟</option><option value="60">1 小时（默认）</option><option value="120">2 小时</option><option value="360">6 小时</option><option value="1440">24 小时</option><option value="custom">自定义分钟</option></select></label><label data-a="developerRetentionCustom" hidden>自定义分钟<input data-f="developerRetentionMinutes" type="number" min="1" max="10080" step="1" aria-label="自定义记录保留分钟"><small style="color:#909399">1–10080 分钟，最多 7 天</small></label></div><small data-a="developerRetentionHelp" style="color:#909399"></small></fieldset>
         <fieldset><legend>登录账号</legend><div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap"><span>当前账号：<b data-a="currentAccount">读取中</b></span><button type="button" data-a="useCurrentAccount">仅允许当前账号</button><button type="button" data-a="clearAccountLimit">清空限制</button></div><label>允许自动诊断的账号（留空不限）<input data-f="allowedAccounts" placeholder="可填账号编号或登录名，多个用逗号分隔"></label><small style="color:#909399">支持账号编号和登录名；留空时所有登录账号都启用。</small><div style="margin-top:8px;padding-top:7px;border-top:1px dashed #dcdfe6"><label><input type="checkbox" data-f="directLoginEnabled"> 未登录时启用协议登录</label><label>协议登录账号<input data-f="directLoginUsername" autocomplete="username" placeholder="账号编号"></label><label><input type="checkbox" data-f="directLoginOcrEnabled"> 使用本机 OCR 自动填写验证码</label><label>OCR 地址<input data-f="directLoginOcrEndpoint" value="http://127.0.0.1:18766/ocr" placeholder="http://127.0.0.1:18766/ocr"></label><div style="display:flex;gap:6px;margin-top:5px"><button type="button" data-a="directLoginNow">立即协议登录</button></div><small style="color:#909399">密码只在点击登录时临时输入，不写入配置。验证码优先使用本机 ddddocr，识别失败再显示手工输入。</small></div></fieldset>
-        <fieldset><legend>报告/影像状态</legend><div class="jx-checks" data-group="reportStatuses"></div><div class="jx-checks" data-group="imageStatuses"></div><label class="jx-check"><input type="checkbox" data-f="skipLockedRecords"> 检测到其他用户锁定的记录时跳过</label><small style="color:#909399">默认开启；关闭后仍要求报告状态为待诊断，再尝试协议校验，服务端拒绝锁定记录时不会强行进入。</small></fieldset>
+        <fieldset><legend>报告/影像状态</legend><div class="jx-checks" data-group="reportStatuses"></div><div class="jx-checks" data-group="imageStatuses"></div><label class="jx-check"><input type="checkbox" data-f="skipLockedRecords" checked disabled> 检测到其他用户锁定的记录时跳过（始终开启）</label><small style="color:#909399">已锁定、占用或非待诊断报告禁止自动进入；旧配置和方案不能关闭此保护。</small></fieldset>
         <fieldset><legend>患者信息</legend><div class="jx-checks" data-group="encounterTypes"></div><div class="jx-checks" data-group="gender"></div><label class="jx-check"><input type="checkbox" data-f="ageUnlimited"> 年龄不限</label><div class="jx-grid"><label>年龄从<input data-f="ageMin" type="number"></label><label>年龄到<input data-f="ageMax" type="number"></label><label>姓名包含<input data-f="patientNameContains"></label><label>申请单号包含<input data-f="applicationNoContains"></label></div></fieldset>
-        <fieldset><legend>检查与机构</legend><div class="jx-checks" data-group="modalities"></div><div class="jx-checks" data-group="applyInstitution"></div><div class="jx-checks" data-group="checkHospitals"></div><div class="jx-checks" data-group="bodyParts"></div><div class="jx-checks" data-group="examNames"></div><div class="jx-exam-head"><span>其他检查项目</span><button type="button" data-a="refreshExamOptions" title="从当前列表更新全部可勾选项目">更新所有可选项目</button></div><div class="jx-checks" data-group="examNamesExtra"></div><small style="color:#909399">检查项目、检查部位、医院和机构均可直接勾选“不限”；权重越大越优先，格式为“项目=权重”，每行一项。</small><label>检查项目权重<textarea data-f="examWeights" rows="4" placeholder="头颅平扫=100&#10;肋骨平扫=10"></textarea></label><label>申请机构权重<textarea data-f="institutionWeights" rows="3" placeholder="机构名称=权重"></textarea></label><label class="jx-check"><input type="checkbox" data-f="preliminaryReportFirst"> 有结论的初写报告优先</label><small style="color:#909399">只识别结论字段；描述、备注不会被当作结论。没有结论的记录仍可处理，只是排序靠后。</small><div class="jx-grid"><label>检查部位最少数量<select data-f="siteMin"><option value="">不限</option><option value="1">1 个</option><option value="2">2 个</option><option value="3">3 个</option><option value="4">4 个</option><option value="5">5 个</option></select></label><label>检查部位最多数量<select data-f="siteMax"><option value="">不限</option><option value="1">1 个</option><option value="2">2 个</option><option value="3">3 个</option><option value="4">4 个</option><option value="5">5 个</option></select></label></div><div class="jx-checks" data-group="diagnosisDoctors"></div><label>审核医生（留空不限）<input data-f="auditDoctors"></label></fieldset>
+        <fieldset><legend>检查与机构</legend>
+          <div class="jx-checks" data-group="modalities"></div>
+          <div class="jx-exam-head"><b>检查项目</b><button type="button" data-a="refreshExamOptions" title="同时更新检查项目、医院、部位、医生和申请机构选项">更新所有可选项目</button></div>
+          <label>搜索可选项目<input type="search" data-a="examSearch" placeholder="输入项目名，允许与排除选项同时筛选" aria-label="搜索检查项目"></label>
+          <section class="jx-exam-section"><div class="jx-exam-head"><b>允许项目</b><span data-a="examAllowedCount"></span></div><div class="jx-checks" data-group="examNames"></div><div class="jx-checks" data-group="examNamesExtra"></div></section>
+          <section class="jx-exam-section jx-exam-excluded"><div class="jx-exam-head"><b>排除项目</b><span data-a="examExcludedCount"></span><button type="button" data-a="clearExamExclusions">清空排除</button></div><div class="jx-checks" data-group="examNamesExcluded"></div><div class="jx-custom-exam"><input data-a="customExcludedExam" placeholder="未列出的项目：输入完整名称" aria-label="自定义排除检查项目"><button type="button" data-a="addExamExclusion">添加并排除</button></div><small class="jx-exam-help">排除优先；允许项目“不限”时仍生效。多项检查中任一项目被排除，整条记录都跳过。按完整名称匹配，左右侧等不同名称可分别勾选。</small></section>
+          <details class="jx-institution-section" open><summary>申请机构、检查医院与部位</summary><div class="jx-checks" data-group="applyInstitution"></div><div class="jx-checks" data-group="checkHospitals"></div><div class="jx-checks" data-group="bodyParts"></div></details>
+          <details><summary>进入优先顺序</summary><small class="jx-exam-help">权重越大越优先；被排除的项目不会参与进入，格式为“名称=权重”，每行一项。</small><label>检查项目权重<textarea data-f="examWeights" rows="4" placeholder="头颅平扫=100&#10;肋骨平扫=10"></textarea></label><label>申请机构权重<textarea data-f="institutionWeights" rows="3" placeholder="机构名称=权重"></textarea></label><label class="jx-check"><input type="checkbox" data-f="preliminaryReportFirst"> 有结论的初写报告优先</label><small class="jx-exam-help">只识别结论字段；描述、备注不会被当作结论。没有结论的记录仍可处理，只是排序靠后。</small></details>
+          <div class="jx-grid"><label>检查部位最少数量<select data-f="siteMin"><option value="">不限</option><option value="1">1 个</option><option value="2">2 个</option><option value="3">3 个</option><option value="4">4 个</option><option value="5">5 个</option></select></label><label>检查部位最多数量<select data-f="siteMax"><option value="">不限</option><option value="1">1 个</option><option value="2">2 个</option><option value="3">3 个</option><option value="4">4 个</option><option value="5">5 个</option></select></label></div><div class="jx-checks" data-group="diagnosisDoctors"></div><label>审核医生（留空不限）<input data-f="auditDoctors"></label>
+        </fieldset>
         <fieldset><legend>申请时间</legend><div class="jx-grid"><label>快捷范围<select data-f="applicationTimeMode"><option value="window">最近 5–30 分钟</option><option value="all">不限</option><option value="today">当天</option><option value="recent">最近 N 天</option><option value="fromTime">当天从指定时间</option></select></label><label>最早分钟<input data-f="applicationTimeMin" type="number" min="0" step="1"></label><label>最晚分钟<input data-f="applicationTimeMax" type="number" min="1" step="1"></label><label>最近天数<input data-f="applicationTimeDays" type="number" min="0" step="1"></label><label>开始时间<input data-f="applicationTimeStart" type="time"></label></div><small style="color:#909399">“最近 5–30 分钟”表示 5 分钟内不处理，超过 30 分钟也不处理。</small></fieldset>
         <details><summary>诊断/审核时间（通常不用，默认不限）</summary><div class="jx-grid"><label>诊断时间模式<select data-f="diagnosisTimeMode"><option value="all">不限</option><option value="today">当天</option><option value="recent">最近 N 天</option><option value="fromTime">当天从指定时间</option></select></label><label>诊断最近天数<input data-f="diagnosisTimeDays" type="number" min="0"></label><label>诊断开始时间<input data-f="diagnosisTimeStart" type="time"></label><label>审核时间模式<select data-f="auditTimeMode"><option value="all">不限</option><option value="today">当天</option><option value="recent">最近 N 天</option><option value="fromTime">当天从指定时间</option></select></label><label>审核最近天数<input data-f="auditTimeDays" type="number" min="0"></label><label>审核开始时间<input data-f="auditTimeStart" type="time"></label></div></details>
         <details><summary>高级：表格选择器与操作按钮</summary><label>诊断操作图标序号<input data-f="diagnoseOperatorIndex" type="number" min="0" style="width:60px"></label><label>待诊断状态值<input data-f="pendingStatusValue"></label><label>表格行选择器<input data-f="bodyRows"></label><label>操作项选择器<input data-f="operatorItems"></label></details>
         <div class="jx-panel-actions" style="display:flex;gap:7px;margin-top:10px"><button type="button" data-a="apply" style="background:#409eff;color:white;border:0;border-radius:4px;padding:7px 14px">应用并保存</button><button type="button" data-a="reset">恢复默认</button><button type="button" data-a="export">导出配置</button><button type="button" data-a="import">导入配置</button><span data-a="msg" style="color:#67c23a;align-self:center"></span></div>
       </div>`;
     document.body.appendChild(box);
-    const style = document.createElement('style'); style.textContent = '#jx-auto-diagnose-panel .jx-panel-header{position:sticky;top:0;z-index:3;flex:0 0 auto;box-shadow:0 1px 5px #0002}#jx-auto-diagnose-panel .jx-panel-content{overscroll-behavior:contain}#jx-auto-diagnose-panel .jx-panel-actions{position:sticky;bottom:0;z-index:2;background:#fff;padding:8px 0 2px;box-shadow:0 -1px 5px #0001}#jx-auto-diagnose-panel fieldset{border:1px solid #dcdfe6;border-radius:6px;margin:7px 0;padding:7px}#jx-auto-diagnose-panel legend{padding:0 4px;color:#409eff}#jx-auto-diagnose-panel label{display:block;margin:4px 0}#jx-auto-diagnose-panel input,#jx-auto-diagnose-panel select,#jx-auto-diagnose-panel textarea{box-sizing:border-box;padding:4px;border:1px solid #dcdfe6;border-radius:4px;margin-top:2px;width:100%;font:inherit}#jx-auto-diagnose-panel .jx-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 10px}#jx-auto-diagnose-panel .jx-checks{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;margin:4px 0}#jx-auto-diagnose-panel .jx-check{display:inline-flex;align-items:center;gap:3px;margin:0;color:#606266}#jx-auto-diagnose-panel .jx-check input{width:auto;margin:0}#jx-auto-diagnose-panel .jx-group-label{color:#909399;margin-right:3px}#jx-auto-diagnose-panel .jx-exam-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:7px;color:#909399}#jx-auto-diagnose-panel .jx-exam-head button{padding:3px 8px;color:#409eff;border-color:#b3d8ff;background:#ecf5ff}#jx-auto-diagnose-panel button{border:1px solid #c0c4cc;background:#fff;border-radius:4px;padding:5px 8px;cursor:pointer}#jx-auto-diagnose-panel button:focus-visible{outline:2px solid #409eff;outline-offset:1px}#jx-auto-diagnose-panel [data-a="close"]{min-width:34px;min-height:30px}#jx-auto-diagnose-panel .jx-dev-toggle{display:inline-flex;align-items:center;gap:4px;color:#e6a23c;font-weight:600}#jx-auto-diagnose-panel .jx-dev-toggle input{width:auto;margin:0}'; box.appendChild(style);
+     const style = document.createElement('style'); style.textContent = '#jx-auto-diagnose-panel .jx-panel-header{position:sticky;top:0;z-index:3;flex:0 0 auto;box-shadow:0 1px 5px #0002}#jx-auto-diagnose-panel .jx-panel-content{overscroll-behavior:contain}#jx-auto-diagnose-panel .jx-panel-actions{position:sticky;bottom:0;z-index:2;background:#fff;padding:8px 0 2px;box-shadow:0 -1px 5px #0001}#jx-auto-diagnose-panel fieldset{border:1px solid #dcdfe6;border-radius:6px;margin:7px 0;padding:7px}#jx-auto-diagnose-panel legend{padding:0 4px;color:#409eff}#jx-auto-diagnose-panel label{display:block;margin:4px 0}#jx-auto-diagnose-panel input,#jx-auto-diagnose-panel select,#jx-auto-diagnose-panel textarea{box-sizing:border-box;padding:4px;border:1px solid #dcdfe6;border-radius:4px;margin-top:2px;width:100%;font:inherit}#jx-auto-diagnose-panel .jx-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 10px}#jx-auto-diagnose-panel .jx-checks{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;margin:4px 0}#jx-auto-diagnose-panel .jx-check{display:inline-flex;align-items:center;gap:3px;margin:0;color:#606266}#jx-auto-diagnose-panel .jx-check input{width:auto;margin:0}#jx-auto-diagnose-panel .jx-group-label{color:#909399;margin-right:3px}#jx-auto-diagnose-panel .jx-exam-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:7px;color:#909399}#jx-auto-diagnose-panel .jx-exam-head button{padding:3px 8px;color:#409eff;border-color:#b3d8ff;background:#ecf5ff}#jx-auto-diagnose-panel button{border:1px solid #c0c4cc;background:#fff;border-radius:4px;padding:5px 8px;cursor:pointer}#jx-auto-diagnose-panel button:focus-visible{outline:2px solid #409eff;outline-offset:1px}#jx-auto-diagnose-panel [data-a="close"]{min-width:34px;min-height:30px}#jx-auto-diagnose-panel .jx-dev-toggle{display:inline-flex;align-items:center;gap:4px;color:#e6a23c;font-weight:600}#jx-auto-diagnose-panel .jx-dev-toggle input{width:auto;margin:0}#jx-auto-diagnose-panel .jx-time-slots{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px}#jx-auto-diagnose-panel .jx-time-slot{display:inline-flex;align-items:center;gap:4px;margin:0;padding:4px 7px;border:1px solid #dcdfe6;border-radius:4px;cursor:pointer;color:#606266}#jx-auto-diagnose-panel .jx-time-slot:has(input:checked){border-color:#409eff;color:#409eff;background:#ecf5ff}#jx-auto-diagnose-panel .jx-time-slot input{width:auto;margin:0}'; box.appendChild(style);
+    style.textContent += '#jx-auto-diagnose-panel [hidden]{display:none!important}';
+    style.textContent += '#jx-auto-diagnose-panel .jx-exam-section{padding:7px 9px;border:1px solid #dcdfe6;border-radius:6px;margin:7px 0;background:#fafcff}#jx-auto-diagnose-panel .jx-exam-section .jx-checks{max-height:180px;overflow:auto;padding:3px 0}#jx-auto-diagnose-panel .jx-exam-section .jx-exam-head{margin:0 0 5px;color:#606266}#jx-auto-diagnose-panel .jx-exam-excluded{border-color:#f3d19e;background:#fdf6ec}#jx-auto-diagnose-panel .jx-exam-excluded b{color:#b36b00}#jx-auto-diagnose-panel .jx-custom-exam{display:flex;align-items:center;gap:7px;margin:8px 0}#jx-auto-diagnose-panel .jx-custom-exam input{flex:1;min-width:0}#jx-auto-diagnose-panel .jx-custom-exam button{flex:0 0 auto}#jx-auto-diagnose-panel .jx-exam-help{display:block;color:#909399;margin-top:5px}#jx-auto-diagnose-panel details{margin:7px 0}#jx-auto-diagnose-panel summary{cursor:pointer;color:#606266;padding:4px 0}#jx-auto-diagnose-panel [data-a="examAllowedCount"],#jx-auto-diagnose-panel [data-a="examExcludedCount"]{color:#909399;font-size:12px}';
     const f = n => box.querySelector(`[data-f="${n}"]`);
-    const GROUPS = { reportStatuses: ['不限','待诊断','诊断中','待审核','审核中','已审核','已打印'], imageStatuses: ['不限','正常','异常'], encounterTypes: ['不限','门诊','急诊','住院','体检'], gender: ['不限','男','女'], modalities: ['不限','CT','MR','DR','DSA','乳腺'], examNames: ['不限', ...DEFAULT_CONFIG.examNames], examNamesExtra: [], checkHospitals: [], bodyParts: [], diagnosisDoctors: [] };
+    const GROUPS = { reportStatuses: ['不限','待诊断','诊断中','待审核','审核中','已审核','已打印'], imageStatuses: ['不限','正常','异常'], encounterTypes: ['不限','门诊','急诊','住院','体检'], gender: ['不限','男','女'], modalities: ['不限','CT','MR','DR','DSA','乳腺'], examNames: ['不限', ...DEFAULT_CONFIG.examNames], examNamesExtra: [], examNamesExcluded: [], checkHospitals: [], bodyParts: [], diagnosisDoctors: [] };
     const DYNAMIC_GROUP_FIELDS = { checkHospitals: 'hospital', bodyParts: 'bodyPart', diagnosisDoctors: 'diagnosisDoctor' };
     function availableExamOptions() {
       const fromRows = queryBodyRows().flatMap(row => {
         const value = rowData(row).exam;
         return String(value || '').split(config.examSeparators).map(norm).filter(Boolean);
       });
-      const known = [...(config.examNamesCatalog || []), ...(config.examNamesExtra || []), ...fromRows, ...DEFAULT_CONFIG.examNames].map(norm).filter(Boolean);
-      return [...new Set(known)].filter(x => !DEFAULT_CONFIG.examNames.some(y => norm(y) === norm(x)));
+      return buildExamOptionCatalog(config, fromRows);
     }
     function drawGroups() {
       for (const [name, baseOptions] of Object.entries(GROUPS)) {
-        let options = name === 'examNamesExtra' ? availableExamOptions() : baseOptions;
+        const commonExams = normalizeExamNameList([...DEFAULT_CONFIG.examNames, ...normalizeExamNameList(config.examNames)]);
+        let options = name === 'examNames' ? ['不限', ...commonExams] : name === 'examNamesExtra' ? availableExamOptions().filter(x => !commonExams.includes(x)) : name === 'examNamesExcluded' ? ['无排除', ...availableExamOptions()] : baseOptions;
         if (DYNAMIC_GROUP_FIELDS[name]) {
           const current = queryBodyRows().map(rowData).map(d => d[DYNAMIC_GROUP_FIELDS[name]]).filter(Boolean);
           options = ['不限', ...new Set([...(config[name] || []), ...(config.columnOptionsCatalog?.[name] || []), ...current].map(norm).filter(Boolean))];
         }
         const host = box.querySelector(`[data-group="${name}"]`); if (!host) continue;
-        const label = {reportStatuses:'报告状态',imageStatuses:'影像状态',encounterTypes:'就诊类型',gender:'性别',modalities:'检查类型',examNames:'检查项目',examNamesExtra:'可选项目',checkHospitals:'检查医院',bodyParts:'检查部位',diagnosisDoctors:'诊断医生'}[name];
+        const label = {reportStatuses:'报告状态',imageStatuses:'影像状态',encounterTypes:'就诊类型',gender:'性别',modalities:'检查类型',examNames:'常用项目',examNamesExtra:'更多项目',examNamesExcluded:'跳过项目',checkHospitals:'检查医院',bodyParts:'检查部位',diagnosisDoctors:'诊断医生'}[name];
         host.innerHTML = `<span class="jx-group-label">${label}：</span>` + options.map(x => `<label class="jx-check"><input type="checkbox" data-group-name="${name}" value="${esc(x)}"><span>${esc(x)}</span></label>`).join('');
       }
       const values = [...new Set([...(config.applyInstitution || []), ...(config.columnOptionsCatalog?.applyInstitution || []), ...queryBodyRows().map(rowData).map(d => d.institution).filter(Boolean)])];
@@ -2218,22 +3441,65 @@
       box.querySelectorAll('input[data-group-name]').forEach(check => check.addEventListener('change', () => {
         const group = check.dataset.groupName;
         const peers = [...box.querySelectorAll(`input[data-group-name="${group}"]`)];
-        const unlimited = peers.find(item => item.value === '不限');
-        if (check.checked && check.value === '不限') peers.forEach(item => { if (item !== check) item.checked = false; });
-        if (check.checked && check.value !== '不限' && unlimited) unlimited.checked = false;
+        const sentinel = group === 'examNamesExcluded' ? '无排除' : '不限';
+        const unlimited = peers.find(item => item.value === sentinel);
+        if (check.checked && check.value === sentinel) {
+          peers.forEach(item => { if (item !== check) item.checked = false; });
+          // “检查项目不限”必须同时清除此前保存在“可选项目”组里的旧勾选。
+          // 否则 examNames 为空但 examNamesExtra 仍有值，运行时会继续过滤，
+          // 用户看到的“不限”与实际规则不一致。
+          if (group === 'examNames') {
+            box.querySelectorAll('[data-group-name="examNamesExtra"]').forEach(item => { item.checked = false; });
+          }
+        }
+        if (check.checked && check.value !== sentinel && unlimited) unlimited.checked = false;
+        if (group === 'examNamesExtra' && check.checked) {
+          const allowAll = box.querySelector('[data-group-name="examNames"][value="不限"]'); if (allowAll) allowAll.checked = false;
+        }
+        if (group === 'examNames' || group === 'examNamesExtra') {
+          const allowAll = box.querySelector('[data-group-name="examNames"][value="不限"]');
+          const selected = [...box.querySelectorAll('[data-group-name="examNames"], [data-group-name="examNamesExtra"]')].some(item => item.value !== '不限' && item.checked);
+          if (allowAll) allowAll.checked = !selected;
+        }
+        if (group === 'examNamesExcluded') {
+          const hasExclusions = peers.some(item => item.value !== sentinel && item.checked);
+          if (unlimited) unlimited.checked = !hasExclusions;
+        }
+        refreshExamUI();
       }));
     }
-    function setGroup(name, values) { const selected = new Set(values || []); box.querySelectorAll(`[data-group-name="${name}"]`).forEach(c => { c.checked = selected.has(c.value) || (c.value === '不限' && !values?.length); }); }
-    function getGroup(name) { const all = [...box.querySelectorAll(`[data-group-name="${name}"]:checked`)].map(x => x.value); return all.includes('不限') ? [] : all; }
+    function setGroup(name, values) { const selected = new Set(values || []); const sentinel = name === 'examNamesExcluded' ? '无排除' : '不限'; box.querySelectorAll(`[data-group-name="${name}"]`).forEach(c => { c.checked = selected.has(c.value) || (c.value === sentinel && !values?.length); }); }
+    function getGroup(name) { const all = [...box.querySelectorAll(`[data-group-name="${name}"]:checked`)].map(x => x.value); return all.includes(name === 'examNamesExcluded' ? '无排除' : '不限') ? [] : all; }
+    function refreshExamUI() {
+      const allowed = [...getGroup('examNames'), ...getGroup('examNamesExtra')];
+      box.querySelector('[data-a="examAllowedCount"]').textContent = allowed.length ? `已选 ${allowed.length} 项` : '不限';
+      const excluded = getGroup('examNamesExcluded');
+      box.querySelector('[data-a="examExcludedCount"]').textContent = excluded.length ? `已排除 ${excluded.length} 项` : '未排除项目';
+      const search = norm(box.querySelector('[data-a="examSearch"]').value).toLocaleLowerCase();
+      for (const name of ['examNames', 'examNamesExtra', 'examNamesExcluded']) {
+        box.querySelectorAll(`[data-group-name="${name}"]`).forEach(input => {
+          const sentinel = input.value === '不限' || input.value === '无排除';
+          const host = input.closest('label'); if (host) host.hidden = !sentinel && !!search && !norm(input.value).toLocaleLowerCase().includes(search);
+        });
+      }
+    }
     function render() {
       drawGroups();
-      f('enabled').checked = !!config.enabled; f('monitoringEnabled').checked = isMonitoringEnabled(); f('developerMode').checked = !!config.developerMode; f('pageQueryRefresh').checked = !!config.pageQueryRefresh; f('skipLockedRecords').checked = config.skipLockedRecords !== false; f('pollMs').value = config.pollMs; f('statusProbeMs').value = config.statusProbeMs || 5000; f('listHeartbeatMs').value = config.listHeartbeatMs || 15000; f('clickDelayMs').value = config.clickDelayMs;
+      const scheduleState = autoEntryScheduleState();
+      if (scheduleState.expired) clearExpiredAutoEntrySchedule(scheduleState);
+      f('enabled').checked = !!config.enabled; f('monitoringEnabled').checked = isMonitoringEnabled(); f('developerMode').checked = !!config.developerMode; f('pageQueryRefresh').checked = !!config.pageQueryRefresh; f('skipLockedRecords').checked = true; f('pollMs').value = config.pollMs; f('statusProbeMs').value = config.statusProbeMs || 5000; f('listHeartbeatMs').value = config.listHeartbeatMs || 15000; f('clickDelayMs').value = config.clickDelayMs; f('entryDelaySeconds').value = Math.max(0, Number(config.entryDelaySeconds) || 0); f('humanizeEntryLevel').value = String(Math.max(0, Math.min(3, Number(config.humanizeEntryLevel) || 0)));
+      box.querySelectorAll('input[data-f="autoEntryTimeSlot"]').forEach(input => { input.checked = input.value === (config.autoEntrySchedule?.slot || ''); });
+      const scheduleStateText = box.querySelector('[data-a="autoEntryTimeState"]'); if (scheduleStateText) scheduleStateText.textContent = autoEntryScheduleText();
+      refreshAutoEntryScheduleUI();
       const debugState = box.querySelector('[data-a="debugState"]'); if (debugState) debugState.textContent = developerModeStateText();
+      refreshDeveloperRetentionUI();
       const currentAccount = box.querySelector('[data-a="currentAccount"]'); if (currentAccount) currentAccount.textContent = accountDisplay();
       f('allowedAccounts').value = listValue(config.allowedAccounts);
       f('directLoginEnabled').checked = !!directLoginConfig().enabled; f('directLoginUsername').value = directLoginConfig().username || ''; f('directLoginOcrEnabled').checked = directLoginConfig().ocrEnabled !== false; f('directLoginOcrEndpoint').value = directLoginConfig().ocrEndpoint || 'http://127.0.0.1:18766/ocr';
       f('entryMode').value = config.entryMode || 'protocol-first';
-      for (const n of ['reportStatuses','imageStatuses','encounterTypes','gender','modalities','examNames','examNamesExtra','checkHospitals','bodyParts','diagnosisDoctors']) setGroup(n, config[n]);
+      for (const n of ['reportStatuses','imageStatuses','encounterTypes','gender','modalities','examNames','examNamesExtra','examNamesExcluded','checkHospitals','bodyParts','diagnosisDoctors']) setGroup(n, config[n]);
+      const allowAll = box.querySelector('[data-group-name="examNames"][value="不限"]'); if (allowAll) allowAll.checked = !(config.examNames?.length || config.examNamesExtra?.length);
+      refreshExamUI();
       setGroup('applyInstitution', config.applyInstitution);
       f('ageUnlimited').checked = !!config.age.unlimited; f('ageMin').value = config.age.min ?? ''; f('ageMax').value = config.age.max ?? ''; f('patientNameContains').value = config.patientNameContains || ''; f('applicationNoContains').value = config.applicationNoContains || '';
       f('examWeights').value = listValue(config.examWeights).replace(/, /g, '\n'); f('institutionWeights').value = listValue(config.institutionWeights).replace(/, /g, '\n'); f('preliminaryReportFirst').checked = config.preliminaryReportFirst !== false;
@@ -2244,31 +3510,78 @@
       const ps = profiles(); f('profile').innerHTML = '<option value="">选择已保存方案</option>' + Object.keys(ps).sort().map(x => `<option>${esc(x)}</option>`).join('');
     }
     function read() {
-      config.enabled = f('enabled').checked; config.monitoringEnabled = f('monitoringEnabled').checked; config.developerMode = f('developerMode').checked; config.pageQueryRefresh = f('pageQueryRefresh').checked; config.skipLockedRecords = f('skipLockedRecords').checked; config.pollMs = Math.max(1000, Number(f('pollMs').value) || 2000); config.statusProbeMs = Math.max(3000, Number(f('statusProbeMs').value) || 5000); config.listHeartbeatMs = Math.max(10000, Number(f('listHeartbeatMs').value) || 15000); config.clickDelayMs = Number(f('clickDelayMs').value) || 0; config.entryMode = f('entryMode').value || 'protocol-first';
+      config.enabled = f('enabled').checked; config.monitoringEnabled = f('monitoringEnabled').checked; config.developerMode = f('developerMode').checked; config.pageQueryRefresh = f('pageQueryRefresh').checked; config.skipLockedRecords = true; config.pollMs = Math.max(1000, Number(f('pollMs').value) || 2000); config.statusProbeMs = Math.max(3000, Number(f('statusProbeMs').value) || 5000); config.listHeartbeatMs = Math.max(10000, Number(f('listHeartbeatMs').value) || 15000); config.clickDelayMs = Number(f('clickDelayMs').value) || 0; config.entryDelaySeconds = Math.max(0, Math.min(300, Number(f('entryDelaySeconds').value) || 0)); config.humanizeEntryLevel = Math.max(0, Math.min(3, Number(f('humanizeEntryLevel').value) || 0)); config.entryMode = f('entryMode').value || 'protocol-first';
+      // 日期授权仅在点击时段时生成；保存其它选项不能把昨日授权延长到今天。
+      if (autoEntryScheduleState().requiresSelection) config.enabled = false;
       config.allowedAccounts = parseList(f('allowedAccounts').value);
       config.directLogin = { enabled: f('directLoginEnabled').checked, username: f('directLoginUsername').value.trim(), ocrEnabled: f('directLoginOcrEnabled').checked, ocrEndpoint: f('directLoginOcrEndpoint').value.trim() || 'http://127.0.0.1:18766/ocr' };
-      for (const n of ['reportStatuses','imageStatuses','encounterTypes','gender','modalities','examNames','examNamesExtra','checkHospitals','bodyParts','diagnosisDoctors']) config[n] = getGroup(n);
+      for (const n of ['reportStatuses','imageStatuses','encounterTypes','gender','modalities','examNames','examNamesExtra','examNamesExcluded','checkHospitals','bodyParts','diagnosisDoctors']) config[n] = getGroup(n);
+      // 兼容旧配置：选择过“不限”后，旧版本可能留下 examNamesExtra。
+      // 以界面上的“不限”勾选为最终语义，保证实际请求和界面一致。
+      const examUnlimited = box.querySelector('[data-group-name="examNames"][value="不限"]')?.checked;
+      if (examUnlimited) { config.examNames = []; config.examNamesExtra = []; }
       config.applyInstitution = getGroup('applyInstitution'); config.auditDoctors = parseList(f('auditDoctors').value);
       config.age.unlimited = f('ageUnlimited').checked; config.age.min = config.age.unlimited || f('ageMin').value === '' ? null : Number(f('ageMin').value); config.age.max = config.age.unlimited || f('ageMax').value === '' ? null : Number(f('ageMax').value); config.patientNameContains = f('patientNameContains').value.trim(); config.applicationNoContains = f('applicationNoContains').value.trim(); config.examWeights = parseList(f('examWeights').value.replace(/\n/g, ',')); config.institutionWeights = parseList(f('institutionWeights').value.replace(/\n/g, ',')); config.preliminaryReportFirst = f('preliminaryReportFirst').checked; config.examSiteCount = { min: f('siteMin').value === '' ? null : Number(f('siteMin').value), max: f('siteMax').value === '' ? null : Number(f('siteMax').value) };
       config.applicationTime = { mode: f('applicationTimeMode').value, minMinutes: Number(f('applicationTimeMin').value) || 0, maxMinutes: Number(f('applicationTimeMax').value) || 0, days: Number(f('applicationTimeDays').value) || 0, start: f('applicationTimeStart').value || '00:00' }; config.diagnosisTime = { mode: f('diagnosisTimeMode').value, days: Number(f('diagnosisTimeDays').value) || 0, start: f('diagnosisTimeStart').value || '00:00' }; config.auditTime = { mode: f('auditTimeMode').value, days: Number(f('auditTimeDays').value) || 0, start: f('auditTimeStart').value || '00:00' };
       config.pendingStatusValue = f('pendingStatusValue').value.trim() || '102501'; config.selectors.diagnoseOperatorIndex = Number(f('diagnoseOperatorIndex').value) || 0; config.selectors.bodyRows = f('bodyRows').value.trim() || DEFAULT_CONFIG.selectors.bodyRows; config.selectors.operatorItems = f('operatorItems').value.trim() || DEFAULT_CONFIG.selectors.operatorItems;
     }
     const msg = t => { const el = box.querySelector('[data-a="msg"]'); if (!el) return; el.textContent = t; setTimeout(() => { const current = box.querySelector('[data-a="msg"]'); if (current) current.textContent = ''; }, 1800); };
-    box.querySelector('[data-a="apply"]').onclick = () => { read(); saveConfig(); start(); msg('已保存并应用'); };
-    box.querySelector('[data-f="developerMode"]').onchange = () => { config.developerMode = f('developerMode').checked; const state = box.querySelector('[data-a="debugState"]'); if (state) state.textContent = developerModeStateText(); if (config.developerMode) developerLog('开发者模式开启', { source: 'settings' }, { force: true }); };
+    box.querySelector('[data-a="apply"]').onclick = () => { read(); saveConfig(); scheduleAutoEntryScheduleExpiry(); start(); msg('已保存并应用'); };
+    box.querySelectorAll('input[data-f="autoEntryTimeSlot"]').forEach(input => input.addEventListener('click', () => {
+      if (!setAutoEntrySchedule(input.value)) {
+        refreshAutoEntryScheduleUI();
+        return msg('该时段今天已结束，请选择其它时段');
+      }
+      saveConfig();
+      scheduleAutoEntryScheduleExpiry();
+      refreshAutoEntryScheduleUI();
+      developerLog('自动进入时段选择', { source: 'settings', ...config.autoEntrySchedule }, { force: true });
+      msg('时段已保存，自动进入已开启');
+    }));
+    box.querySelector('[data-a="clearAutoEntryTimeSlot"]').onclick = () => {
+      config.autoEntrySchedule = { slot: '', date: '', requiresSelection: true };
+      config.enabled = false;
+      saveConfig();
+      scheduleAutoEntryScheduleExpiry();
+      render();
+      msg('自动进入已关闭，请重新选择时段');
+    };
+    box.querySelector('[data-f="developerMode"]').onchange = () => { config.developerMode = f('developerMode').checked; saveConfig(); const state = box.querySelector('[data-a="debugState"]'); if (state) state.textContent = developerModeStateText(); if (config.developerMode) developerLog('开发者模式开启', { source: 'settings' }, { force: true }); };
+    box.querySelector('[data-f="developerRetentionPreset"]').onchange = () => {
+      const preset = f('developerRetentionPreset').value;
+      if (preset === 'custom') { const custom = box.querySelector('[data-a="developerRetentionCustom"]'); if (custom) custom.hidden = false; f('developerRetentionMinutes').focus(); return; }
+      setDeveloperRetentionMinutes(preset); msg('保留时长已保存');
+    };
+    box.querySelector('[data-f="developerRetentionMinutes"]').onchange = () => { setDeveloperRetentionMinutes(f('developerRetentionMinutes').value); msg('保留时长已保存'); };
     box.querySelector('[data-a="copyDebug"]').onclick = async () => { try { await navigator.clipboard?.writeText(developerLogText()); msg(debugEvents.length ? '诊断记录已复制' : '当前没有诊断记录'); } catch (_) { msg('复制失败，请打开控制台查看'); } };
-    box.querySelector('[data-a="clearDebug"]').onclick = () => { debugEvents.length = 0; debugLastAt.clear(); try { GM_setValue(DEBUG_STORAGE_KEY, []); } catch (_) {} const state = box.querySelector('[data-a="debugState"]'); if (state) state.textContent = developerModeStateText(); msg('诊断记录已清空'); };
+    box.querySelector('[data-a="clearDebug"]').onclick = () => { clearDeveloperEvents(); const state = box.querySelector('[data-a="debugState"]'); if (state) state.textContent = developerModeStateText(); msg('诊断记录已清空'); };
     box.querySelector('[data-a="selfCheck"]').onclick = async () => { msg('正在运行自检…'); const result = await runSelfCheck(); alert(result); msg('自检完成'); };
     box.querySelector('[data-a="useCurrentAccount"]').onclick = () => { const identity = loginIdentity(); const value = identity.loginCode || identity.name; if (!value) return msg('当前账号暂未识别'); f('allowedAccounts').value = value; msg('已填入当前账号'); };
     box.querySelector('[data-a="clearAccountLimit"]').onclick = () => { f('allowedAccounts').value = ''; msg('已清空账号限制'); };
     box.querySelector('[data-a="directLoginNow"]').onclick = async () => { read(); saveConfig(); msg('正在协议登录…'); const ok = await ensureDirectLogin(); msg(ok ? '协议登录成功' : '协议登录未完成'); if (ok) { render(); start(); } };
+    box.querySelector('[data-a="examSearch"]').oninput = refreshExamUI;
+    box.querySelector('[data-a="clearExamExclusions"]').onclick = () => {
+      read(); config.examNamesExcluded = []; saveConfig(); setGroup('examNamesExcluded', []); refreshExamUI(); msg('已清空排除项目');
+    };
+    box.querySelector('[data-a="addExamExclusion"]').onclick = () => {
+      const input = box.querySelector('[data-a="customExcludedExam"]');
+      const names = normalizeExamNameList(input.value);
+      if (!names.length) { input.focus(); return msg('请输入完整检查项目名'); }
+      read();
+      config.examNamesExcluded = normalizeExamNameList([...config.examNamesExcluded, ...names]);
+      config.examNamesCatalog = buildExamOptionCatalog(config, names);
+      saveConfig(); render(); input.value = ''; input.focus(); msg(`已添加并排除 ${names.length} 项`);
+    };
+    box.querySelector('[data-a="customExcludedExam"]').addEventListener('keydown', event => {
+      if (event.key === 'Enter') { event.preventDefault(); box.querySelector('[data-a="addExamExclusion"]').click(); }
+    });
     box.querySelector('[data-a="refreshExamOptions"]').onclick = async () => {
       read();
       msg('正在更新可选项目…');
       const records = await fetchRadiationRecords({ pageSize: 100, timeoutMs: 8000, ignoreApplicationTime: true, ignoreStatusFilter: true, ignoreModalityFilter: true, ignoreInstitutionFilter: true, ignoreBodyPartFilter: true });
       const fromApi = records.flatMap(record => String(record?.examName || record?.exam || '').split(config.examSeparators).map(norm).filter(Boolean));
-      const options = [...new Set([...availableExamOptions(), ...fromApi])].filter(x => !DEFAULT_CONFIG.examNames.some(y => norm(y) === norm(x)));
-      config.examNamesCatalog = [...new Set([...(config.examNamesCatalog || []), ...options])];
+      const options = buildExamOptionCatalog(config, [...availableExamOptions(), ...fromApi]);
+      config.examNamesCatalog = options;
       const dynamic = {
         checkHospitals: records.map(record => record?.checkOrgName || record?.checkOrg),
         bodyParts: records.map(record => record?.bodyPartName || record?.bodyPart || record?.checkPartName || record?.checkPart),
@@ -2284,13 +3597,19 @@
       const dynamicCount = Object.values(dynamic).flat().map(norm).filter(Boolean).length;
       msg(`已更新 ${options.length + dynamicCount} 个可选项目`);
     };
-    box.querySelector('[data-a="reset"]').onclick = () => { config = structuredClone(DEFAULT_CONFIG); saveConfig(); render(); start(); msg('已恢复默认'); };
+    box.querySelector('[data-a="reset"]').onclick = () => { config = configWithCurrentEntrySchedule(DEFAULT_CONFIG); saveConfig(); render(); start(); msg('已恢复默认筛选，时段保持当前选择'); };
     box.querySelector('[data-a="saveProfile"]').onclick = () => { read(); const n = f('profileName').value.trim(); if (!n) return msg('请填写方案名'); const p = profiles(); p[n] = config; saveProfiles(p); render(); f('profile').value = n; msg('方案已保存'); };
-    box.querySelector('[data-a="loadProfile"]').onclick = () => { const n = f('profile').value; const p = profiles(); if (!n || !p[n]) return msg('请选择方案'); config = migrateConfig(merge(structuredClone(DEFAULT_CONFIG), p[n]), p[n]); saveConfig(); render(); start(); msg('方案已切换'); };
+    box.querySelector('[data-a="loadProfile"]').onclick = () => { const n = f('profile').value; const p = profiles(); if (!n || !p[n]) return msg('请选择方案'); config = configWithCurrentEntrySchedule(p[n]); saveConfig(); render(); start(); msg('方案已切换，时段保持当前选择'); };
     box.querySelector('[data-a="deleteProfile"]').onclick = () => { const n = f('profile').value; const p = profiles(); if (n && p[n]) { delete p[n]; saveProfiles(p); render(); msg('方案已删除'); } };
     box.querySelector('[data-a="export"]').onclick = async () => { await navigator.clipboard?.writeText(JSON.stringify(config, (k, v) => v instanceof RegExp ? { __regexp: v.source } : v, 2)); msg('配置 JSON 已复制'); };
-    box.querySelector('[data-a="import"]').onclick = () => { const s = prompt('粘贴配置 JSON'); if (!s) return; try { const n = JSON.parse(s); if (n.examSeparators?.__regexp) n.examSeparators = new RegExp(n.examSeparators.__regexp); config = migrateConfig(merge(structuredClone(DEFAULT_CONFIG), n), n); saveConfig(); render(); start(); msg('已导入'); } catch (e) { msg('JSON 无效'); } };
+    box.querySelector('[data-a="import"]').onclick = () => { const s = prompt('粘贴配置 JSON'); if (!s) return; try { const n = JSON.parse(s); if (n.examSeparators?.__regexp) n.examSeparators = new RegExp(n.examSeparators.__regexp); config = configWithCurrentEntrySchedule(n); saveConfig(); render(); start(); msg('已导入，时段保持当前选择'); } catch (e) { msg('JSON 无效'); } };
     box.querySelector('[data-a="close"]').onclick = () => box.remove();
+    box.addEventListener('change', event => {
+      const target = event.target;
+      if (!target?.matches?.('input[data-f], select[data-f], textarea[data-f], input[data-group-name]')) return;
+      if (['autoEntryTimeSlot', 'developerMode', 'developerRetentionPreset', 'developerRetentionMinutes', 'profile', 'profileName'].includes(target.dataset.f)) return;
+      read(); saveConfig(); scheduleAutoEntryScheduleExpiry(); msg('已自动保存');
+    });
     render();
   }
 
@@ -2310,10 +3629,19 @@
   }
 
   GM_registerMenuCommand('自动诊断：配置', panel);
-  GM_registerMenuCommand('自动诊断：启用/停用', () => { config.enabled = !config.enabled; saveConfig(); console.info('[自动诊断] enabled =', config.enabled); });
+  GM_registerMenuCommand('自动诊断：启用/停用', () => {
+    isAutoOpenEnabled();
+    if (autoEntryScheduleState().requiresSelection) { panel(); return; }
+    config.enabled = !config.enabled; saveConfig(); refreshAutoEntryScheduleUI();
+    console.info('[自动诊断] enabled =', config.enabled);
+  });
   window.addEventListener('beforeunload', () => {
     stopRuntime('beforeunload');
+    flushDeveloperEvents();
+    if (debugCleanupTimer) clearInterval(debugCleanupTimer);
     if (routeWatchTimer) clearInterval(routeWatchTimer);
+    if (loginRecoveryTimer) clearTimeout(loginRecoveryTimer);
+    if (autoEntryScheduleTimer) clearTimeout(autoEntryScheduleTimer);
     if (timer) clearInterval(timer);
     if (probeTimer) clearTimeout(probeTimer);
     if (realtimeRefreshTimer) clearTimeout(realtimeRefreshTimer);
@@ -2324,17 +3652,50 @@
     window.removeEventListener('popstate', watchRoute);
     window.removeEventListener('hashchange', watchRoute);
     window.removeEventListener(REALTIME_HINT_EVENT, onRealtimeHint);
+    window.removeEventListener(REPORT_ENTRY_EVENT, onReportEntryObserved);
   });
+  restoreAutomaticEntryHistory();
+  installReportEntryBridge();
   installRealtimeHintBridge();
+  scheduleAutoEntryScheduleExpiry();
   let bootstrapped = false;
+  function scheduleLoginRecovery() {
+    if (loginRecoveryTimer) clearTimeout(loginRecoveryTimer);
+    if (pageWindow().location.pathname !== '/login') return;
+    loginRecoveryTimer = setTimeout(() => {
+      loginRecoveryTimer = null;
+      if (pageWindow().location.pathname !== '/login') return;
+      // 不在这里弹出密码框：密码只允许当前页面会话临时使用。
+      // 仅当用户已在当前会话输入过密码时自动重试，避免登录路由切换反复打断页面。
+      const canRetry = !!directPassword;
+      developerLog('登录路由恢复等待', {
+        source: 'route-guard',
+        canRetry,
+        hasAuthCookie: !!readCookie('Auth'),
+        directLoginConfigured: !!(directLoginConfig().enabled && directLoginConfig().username)
+      }, { force: true });
+      if (canRetry) {
+        bootstrapped = false;
+        bootstrap();
+      }
+    }, 1200);
+  }
   function watchRoute() {
     const path = pageWindow().location.pathname;
     let changed = false;
     if (path !== lastObservedPath) {
       const previous = lastObservedPath; lastObservedPath = path;
       changed = true;
+      maintainFinalEntryPendingRoute(path, previous);
       developerLog('路由变化', { source: 'route-guard', from: previous || '(初始)', to: path }, { force: true });
-      if (!isMonitorRoute(path)) stopRuntime('route-exit');
+      if (!isMonitorRoute(path)) {
+        stopRuntime('route-exit');
+        // 允许 /login -> /radiation 时重新走一次初始化和会话检查。
+        // 旧逻辑保留 bootstrapped=true，登录路由回来后只重启定时器，
+        // 会跳过一次必要的直接登录/身份恢复检查。
+        bootstrapped = false;
+        if (path === '/login') scheduleLoginRecovery();
+      }
     }
     // SPA 从诊断页返回列表时 bootstrapped 仍为 true，但 stopRuntime 已经
     // 清掉了所有定时器、Observer 和运行状态。必须在每次真正回到列表页时

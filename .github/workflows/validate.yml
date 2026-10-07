@@ -9,16 +9,33 @@ permissions:
 
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: node --check jiangxi-radiation-auto-diagnose.user.js
-      - run: node tests/source-contract.test.mjs
-      - run: node tests/release-failure.test.mjs
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - run: node --check jiangxi-radiation-auto-diagnose.user.js
+      - run: node tests/source-contract.test.mjs
+      - run: node tests/auto-entry-schedule.test.mjs
+      - run: node tests/developer-retention.test.mjs
+      - run: node tests/report-entry-observer.test.mjs
+      - run: node tests/configuration-persistence.test.mjs
+      - run: node tests/final-entry-pending.test.mjs
+      - run: node tests/locked-entry-hard-gate.test.mjs
+      - run: node tests/request-preparation.test.mjs
+      - run: node tests/automatic-entry-once.test.mjs
+      - run: node tests/report-record-resolution.test.mjs
+      - run: node tests/exam-exclusions.test.mjs
+      - run: node tests/direct-login.test.mjs
+      - run: node tests/lifecycle-diagnostics.test.mjs
+      - run: node tests/release-failure.test.mjs
       - run: python tests/captcha_ocr.test.py
+      - run: python -B tests/runtime-verifier.test.py

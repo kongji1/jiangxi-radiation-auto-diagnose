@@ -10,13 +10,13 @@ const candidateLifecycle = new Map();
 const events = [];
 const norm = value => String(value ?? '').trim();
 const helpers = new Function(
-  'candidateLifecycle', 'DEBUG_RETENTION_MS', 'config', 'norm', 'dataKeys', 'debugTag',
+  'candidateLifecycle', 'developerRetentionMs', 'config', 'norm', 'dataKeys', 'debugTag',
   'lockedRecordDetected', 'matchFailureReasons', 'shouldSkipLocked', 'debugCandidate',
   'developerLog', 'recordData',
   `${source.slice(start, end)}; return { observeCandidateLifecycle, reconcileCandidateSnapshot };`
 )(
   candidateLifecycle,
-  600000,
+  () => 3600000,
   { seenLimit: 500 },
   norm,
   data => [data?.key].filter(Boolean),
