@@ -4,7 +4,8 @@
     "sourceVersion": "0.8.54",
     "sourceSha256Lf": "5cfd7ce20debaed268a349394fbaa2b2029b41a2d8f3d02209a9bf18cd4786ab",
     "javascriptSuites": 14,
-    "powershellFailureSuccessCases": 22,
+    "powershellFailureSuccessCases": 24,
+    "examExclusionCases": 14,
     "runtimeEvidenceCases": 8,
     "ocrUnitCases": 4,
     "currentPageVersion": "0.8.54",
@@ -13,7 +14,7 @@
     "ribExclusionPersisted": true,
     "reportReloaded": false,
     "ocrServiceHealth": "not connected on 18766; local regression used SkipOcrHealth",
-    "publication": "repository exists; verify pushed commit, Raw and Actions separately",
+    "publication": "6c43ac4 pushed to main; Raw 0.8.54 matches source SHA256; Windows CI newline fixture fix requires a new run",
     "record": "docs/CLOSEOUT_20261007.md"
   },
   "project": "江西省县域医共体 - 自动诊断候选",

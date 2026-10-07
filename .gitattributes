@@ -1,0 +1,3 @@
+# Keep distributed userscript bytes and source-extraction fixtures portable.
+*.user.js text eol=lf
+*.mjs text eol=lf

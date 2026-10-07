@@ -1,11 +1,13 @@
 import fs from 'node:fs';
 import assert from 'node:assert/strict';
 
-const source = fs.readFileSync(new URL('../jiangxi-radiation-auto-diagnose.user.js', import.meta.url), 'utf8');
-const section = (start, end) => {
-  const from = source.indexOf(start), to = source.indexOf(end, from + start.length);
+const normalizeSource = text => text.replace(/\r\n/g, '\n');
+const source = normalizeSource(fs.readFileSync(new URL('../jiangxi-radiation-auto-diagnose.user.js', import.meta.url), 'utf8'));
+const section = (start, end, input = source) => {
+  const normalized = normalizeSource(input);
+  const from = normalized.indexOf(start), to = normalized.indexOf(end, from + start.length);
   assert.ok(from >= 0 && to > from, `source section ${start}`);
-  return source.slice(from, to);
+  return normalized.slice(from, to);
 };
 const defaults = new Function(`${section('  const DEFAULT_CONFIG = {', '\n  const STORAGE_KEY =')}; return DEFAULT_CONFIG;`)();
 const configCode = section('  function loadConfig()', '  function entryDelayPlan(');
@@ -157,6 +159,16 @@ await test('actual Add and clear buttons persist custom exclusions without Apply
     clearBox, () => {}, r.config, r.saveConfig, () => {}, () => {}, () => {});
   clear.onclick(); assert.deepEqual(runtime(null, r.shared).config.examNamesExcluded, []);
   assert.ok(r.config.examNamesCatalog.includes('synthetic-new'));
+});
+
+await test('actual multiline handler extraction is identical after LF and CRLF checkouts', () => {
+  const start = "      box.querySelectorAll('input[data-group-name]').forEach";
+  const end = '\n    }\n    function setGroup';
+  const lf = section(start, end, source);
+  const crlf = section(start, end, source.replace(/\n/g, '\r\n'));
+  assert.equal(crlf, lf);
+  assert.ok(lf.includes('addEventListener'));
+  assert.doesNotThrow(() => new Function('box', 'refreshExamUI', crlf));
 });
 
 console.log(`exam-exclusions: ${passed} scenarios passed`);
