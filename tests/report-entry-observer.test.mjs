@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-const source = fs.readFileSync(new URL('../jiangxi-radiation-auto-diagnose.user.js', import.meta.url), 'utf8');
+const source = fs.readFileSync(new URL('../src/13-protocol-bridges.js', import.meta.url), 'utf8');
 const start = source.indexOf('  function installReportEntryPageObserver(');
 const end = source.indexOf('  function installReportEntryBridge()', start);
 assert(start >= 0 && end > start, 'report observer source exists');
@@ -27,6 +27,7 @@ function runtime({ fetch, maxBytes, mode = 'text' } = {}) {
   const events = [];
   const logs = [];
   const nativeCalls = [];
+  const loadedAcknowledgements = [];
   class FakeXHR {
     listeners = new Map();
     status = 0;
@@ -52,6 +53,7 @@ function runtime({ fetch, maxBytes, mode = 'text' } = {}) {
     location: { href: 'http://10.10.94.90:22112/radiation/report?id=synthetic-1', origin: 'http://10.10.94.90:22112' },
     fetch: fetch || (() => Promise.resolve(new Response(JSON.stringify(payload), { status: 200 }))),
     XMLHttpRequest: FakeXHR, CustomEvent: FakeCustomEvent,
+    __JX_PROTOCOL_ENTRY_HANDOFF__: { confirmLoaded: repUid => { loadedAcknowledgements.push(repUid); return true; } },
     dispatchEvent(event) { events.push(JSON.parse(event.detail)); return true; }
   };
   const context = vm.createContext({
@@ -60,11 +62,13 @@ function runtime({ fetch, maxBytes, mode = 'text' } = {}) {
     completeFinalEntryPending: () => false,
     norm: value => String(value || '').trim(), loginIdentity: () => ({ name: 'synthetic-doctor' }),
     accountValueMatches: (expected, actual) => expected === actual,
+    pageWindow: () => page, pendingFinalEntryState: () => null, readAutomaticEntry: () => null,
+    consumeAutomaticEntry: () => true, releaseAutomaticEntry: () => true,
     page, observedEvent, maxBytes
   });
   vm.runInContext(observerSource, context);
   vm.runInContext('installReportEntryPageObserver(page, observedEvent, maxBytes)', context);
-  return { page, events, logs, nativeCalls, context, flush: () => new Promise(resolve => setImmediate(resolve)) };
+  return { page, events, logs, nativeCalls, loadedAcknowledgements, context, flush: () => new Promise(resolve => setImmediate(resolve)) };
 }
 
 let tested = 0;
@@ -280,6 +284,40 @@ await test('GET detail log is distinct from entry lock and final loading require
   assert.equal(r.logs[0].name, '报告详情读取完成');
   assert.equal(r.logs[0].detail.endpointKind, 'report-detail');
   assert.equal(r.logs[0].detail.finalReportLoaded, false, 'navigation to another report cannot prove current report loaded');
+});
+
+await test('loaded acknowledgement requires successful same-route POST with exact response UID and current owner', async () => {
+  const r = runtime();
+  r.context.detail = JSON.stringify({
+    outcome: 'complete', phase: 'report-enter', requestMethod: 'POST', endpointKind: 'radiation-entry',
+    repUid: 'synthetic-1', responseRepUid: 'synthetic-1', reportDoctor: 'synthetic-doctor',
+    route: '/radiation/report', responseRoute: '/radiation/report',
+    routeReportId: 'synthetic-1', responseRouteReportId: 'synthetic-1', reportIdMatches: true
+  });
+  vm.runInContext('onReportEntryObserved({ detail })', r.context);
+  assert.deepEqual(r.loadedAcknowledgements, ['synthetic-1']);
+});
+
+await test('wrong doctor, UID, route, method and failed observations never acknowledge loaded state', async () => {
+  const successful = {
+    outcome: 'complete', phase: 'report-enter', requestMethod: 'POST', endpointKind: 'radiation-entry',
+    repUid: 'synthetic-1', responseRepUid: 'synthetic-1', reportDoctor: 'synthetic-doctor',
+    route: '/radiation/report', responseRoute: '/radiation/report',
+    routeReportId: 'synthetic-1', responseRouteReportId: 'synthetic-1', reportIdMatches: true
+  };
+  for (const difference of [
+    { reportDoctor: 'synthetic-other' }, { reportDoctor: '' }, { responseRepUid: 'synthetic-other' }, { responseRepUid: '' },
+    { responseRouteReportId: 'synthetic-other' }, { responseRoute: '/radiation' }, { routeReportId: 'synthetic-other' },
+    { reportIdMatches: false }, { requestMethod: 'GET' }, { endpointKind: 'report-detail' },
+    { outcome: 'rejected' }, { outcome: 'error' }
+  ]) {
+    const r = runtime(); r.context.detail = JSON.stringify({ ...successful, ...difference });
+    vm.runInContext('onReportEntryObserved({ detail })', r.context);
+    assert.deepEqual(r.loadedAcknowledgements, [], JSON.stringify(difference));
+  }
+  const r = runtime(); r.context.loginIdentity = () => ({ name: '' }); r.context.detail = JSON.stringify(successful);
+  vm.runInContext('onReportEntryObserved({ detail })', r.context);
+  assert.deepEqual(r.loadedAcknowledgements, [], 'unknown current doctor cannot acknowledge');
 });
 
 console.log(`passed ${tested} report-entry observer cases`);

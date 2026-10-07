@@ -430,6 +430,8 @@ def parser():
     diagnosis = sub.add_parser("diagnose", help="Read retained evidence for a named candidate; do not save it")
     diagnosis.add_argument("--name", required=True)
     diagnosis.add_argument("--cdp", default=DEFAULT_CDP)
+    diagnosis.add_argument("--with-audit", action="store_true", help="Also read the narrow server operation history")
+    diagnosis.add_argument("--date", help="Date for the optional server operation history")
     version = sub.add_parser("version", help="Advance manifest/state version and regenerate with rollback")
     version.add_argument("--to", required=True)
     version.add_argument("--dry-run", action="store_true")
@@ -447,8 +449,12 @@ def main(argv=None):
         if args.command == "diagnose":
             local_cdp(args.cdp)
             # Explicit diagnosis is displayed only in this terminal, never cached.
-            process = subprocess.run([sys.executable, "-B", "tools/diagnose-candidate.py", "--name", args.name,
-                                      "--cdp", args.cdp], cwd=ROOT)
+            command = [sys.executable, "-B", "tools/diagnose-candidate.py", "--name", args.name, "--cdp", args.cdp]
+            if args.with_audit:
+                command.append("--with-audit")
+            if args.date:
+                command.extend(["--date", args.date])
+            process = subprocess.run(command, cwd=ROOT)
             return process.returncode
         if args.command == "status":
             value = status_project(cdp=local_cdp(args.cdp), no_runtime=args.no_runtime)

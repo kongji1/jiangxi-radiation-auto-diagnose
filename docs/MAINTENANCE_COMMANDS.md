@@ -17,6 +17,8 @@ python -B tools/maintain-project.py version --to 0.8.56 --dry-run
 
 `diagnose` 委托 `tools/diagnose-candidate.py`，仅在终端显示当前请求的排查结果；维护入口不缓存姓名、病例或认证数据。候选分析工具的默认路径只读取本地保留信息。
 
+终审提示失败而新界面显示成功时，可用 `diagnose --name "客户姓名" --with-audit --date 2026-10-07` 一次读取本地日志与限定当天的服务器操作记录。只有显式添加 `--with-audit` 才发送只读业务查询；不要重复提交终审来验证。
+
 ## 测试注册与选择
 
 `tools/test-suites.json` 是 Node/Python 测试的唯一登记表。新增可执行的 `*.test.mjs`、`*.test.py` 若未登记，维护直接失败，防止悄悄漏测。

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-const source = fs.readFileSync(new URL('../jiangxi-radiation-auto-diagnose.user.js', import.meta.url), 'utf8');
+const source = fs.readFileSync(new URL('../src/13-protocol-bridges.js', import.meta.url), 'utf8');
 const start = source.indexOf('  function installProtocolEntryHandoff(');
 const end = source.indexOf('  function installReportEntryPageObserver(', start);
 assert(start >= 0 && end > start, 'real handoff helper exists');
@@ -41,8 +41,8 @@ function runtime({ lockedProperty = false, lockedHook = false, noProgressEvent =
   if (lockedHook) Object.defineProperty(FakeXHR.prototype, 'send', { writable: false });
   const user = { currentWorkStation: '105701' };
   const app = store ? { __vue_app__: { config: { globalProperties: { $pinia: { _s: new Map([['user', user]]) } } } } } : null;
-  const nativePromise = Promise.resolve(new Response('{}'));
-  const originalFetch = function (...args) { calls.push({ method: 'fetch', args, self: this }); return nativePromise; };
+  const nativePromise = Promise.resolve(new Response('{}')), nativeResponses = [];
+  const originalFetch = function (...args) { calls.push({ method: 'fetch', args, self: this }); return nativeResponses.length ? Promise.resolve(nativeResponses.shift()) : nativePromise; };
   const page = {
     location: { href: `${origin}/radiation`, origin },
     document: { cookie: `AUTH=${noAuth ? '' : 'synthetic-session'}; LOGINCODE=synthetic-account; WORKSTATION=105701`, getElementById: () => app },
@@ -64,7 +64,7 @@ function runtime({ lockedProperty = false, lockedHook = false, noProgressEvent =
     await new Promise(resolve => setImmediate(resolve));
   };
   return {
-    page, bridge, context, user, calls, nativePromise, originalFetch, baseline, flush,
+    page, bridge, context, user, calls, nativePromise, nativeResponses, originalFetch, baseline, flush,
     advance: async ms => { now += ms; await flush(); },
     report: (id = request.repUid) => { page.location.href = `${origin}/radiation/report?id=${encodeURIComponent(id)}`; },
     stage: (value = body, text = responseText, status = 200, headers = { 'content-type': 'application/json', 'x-synthetic': 'present' }, ttl = 15000) => bridge.stage(value, text, status, headers, ttl),
@@ -81,6 +81,35 @@ function xhr(r, { value = body, url = endpoint, method = 'POST', responseType = 
   if (headers) { valueXHR.setRequestHeader('LOGIN-USER-KEY', 'synthetic-account'); valueXHR.setRequestHeader('Authorization', 'synthetic-session'); }
   const returned = valueXHR.send(value);
   return { xhr: valueXHR, events, returned };
+}
+
+function acknowledgeThroughRealObserver(r, { delayed = false } = {}) {
+  const begin = source.indexOf('  function installReportEntryPageObserver(');
+  const finish = source.indexOf('  function installReportEntryBridge(', begin);
+  const observations = [], logs = [], queued = [];
+  const deliver = event => {
+    r.context.observedEvent = event;
+    vm.runInContext('onReportEntryObserved(observedEvent)', r.context);
+  };
+  Object.assign(r.context, {
+    Promise, TextDecoder, pageWindow: () => r.page,
+    norm: value => String(value || '').trim(), loginIdentity: () => ({ name: 'synthetic-doctor' }),
+    accountValueMatches: (expected, actual) => expected === actual,
+    developerLog: (name, detail) => logs.push({ name, detail }),
+    pendingFinalEntryState: () => null, readAutomaticEntry: () => null,
+    consumeAutomaticEntry: () => true, releaseAutomaticEntry: () => true,
+    completeFinalEntryPending: () => false,
+    stopAutoOpenAfterAcquisitionFailure: () => assert.fail('no initial pending failure expected')
+  });
+  r.page.CustomEvent = class { constructor(type, options) { this.type = type; this.detail = options.detail; } };
+  r.page.dispatchEvent = event => {
+    observations.push(JSON.parse(event.detail));
+    if (delayed) queued.push(event); else deliver(event);
+    return true;
+  };
+  vm.runInContext(source.slice(begin, finish), r.context);
+  vm.runInContext("installReportEntryPageObserver(page, 'synthetic-loaded-ack')", r.context);
+  return { observations, logs, acknowledge: () => { for (const event of queued.splice(0)) deliver(event); } };
 }
 
 let tested = 0;
@@ -315,6 +344,152 @@ await test('fetch identity header mismatch spends the matching ticket and never 
   await assert.rejects(r.page.fetch(endpoint, { method: 'POST', body, headers: { Authorization: 'synthetic-wrong-session' } }), /no longer available/);
   assert.equal(r.count('fetch'), 0); assert.equal(r.bridge.peek(id).pending, false); assert.equal(r.stage(), false);
   await assert.rejects(r.page.fetch(endpoint, { method: 'POST', body }), /no longer available/); assert.equal(r.count('fetch'), 0);
+});
+
+await test('only completed XHR delivery can be acknowledged, then native refresh is transparent', async () => {
+  const r = runtime(); r.stage(); r.report();
+  assert.equal(r.bridge.confirmLoaded(request.repUid), false, 'pending ticket cannot be acknowledged');
+  const first = xhr(r);
+  assert.equal(r.bridge.confirmLoaded(request.repUid), false, 'consumption is not delivery completion');
+  first.xhr.onloadend = () => assert.equal(r.bridge.confirmLoaded(request.repUid), false, 'ack starts after successful loadend');
+  await r.flush();
+  assert.equal(r.bridge.confirmLoaded(request.repUid), true);
+  assert.equal(r.bridge.confirmLoaded(request.repUid), false, 'ack is one transition');
+  assert.equal(xhr(r).returned, 'native-send'); assert.equal(r.count('send'), 1);
+  assert.equal(r.stage(), false, 'loaded key still cannot pre-acquire again');
+});
+
+await test('concurrent startup duplicate and delivered but unacknowledged requests never repeat POST', async () => {
+  const r = runtime(); r.stage(); r.report(); const first = xhr(r), concurrent = xhr(r);
+  await r.flush();
+  assert.equal(first.xhr.status, 200); assert.equal(concurrent.xhr.status, 0);
+  assert.equal(concurrent.events.some(event => event.type === 'error'), true);
+  await r.advance(60000);
+  const unacknowledged = xhr(r); await r.flush();
+  assert.equal(unacknowledged.xhr.status, 0); assert.equal(r.count('send'), 0);
+});
+
+await test('expired, discarded, unsupported and aborted deliveries cannot be acknowledged', async () => {
+  for (const failure of ['expired', 'discarded', 'unsupported', 'sync', 'abort-before', 'abort-during', 'abort-after']) {
+    const r = runtime(); const id = r.stage(); r.report();
+    if (failure === 'expired') await r.advance(15000);
+    if (failure === 'discarded') r.bridge.discard(id);
+    const first = xhr(r, { responseType: failure === 'unsupported' ? 'blob' : '', async: failure !== 'sync' });
+    if (failure === 'abort-before') first.xhr.abort();
+    if (failure === 'abort-during') first.xhr.addEventListener('readystatechange', () => { if (first.xhr.readyState === 2) first.xhr.abort(); });
+    await r.flush();
+    if (failure === 'abort-after') first.xhr.abort();
+    assert.equal(r.bridge.confirmLoaded(request.repUid), false, failure);
+    assert.equal(r.count('send'), 0, failure);
+  }
+});
+
+await test('ack requires the same report route and complete original session identity', async () => {
+  for (const change of [r => r.report('synthetic-other'), r => { r.page.document.cookie = r.page.document.cookie.replace('synthetic-account', 'synthetic-other'); }, r => { r.page.document.cookie = r.page.document.cookie.replace('synthetic-session', 'synthetic-new-session'); }, r => { r.page.document.cookie = r.page.document.cookie.replace('WORKSTATION=105701', 'WORKSTATION=105702'); }, r => { r.user.currentWorkStation = '105702'; }]) {
+    const r = runtime(); r.stage(); r.report(); xhr(r); await r.flush(); change(r);
+    assert.equal(r.bridge.confirmLoaded(request.repUid), false);
+  }
+  const r = runtime(); r.stage(); r.report(); xhr(r); await r.flush();
+  assert.equal(r.bridge.confirmLoaded('synthetic-other'), false);
+  assert.equal(r.bridge.confirmLoaded(123), false);
+});
+
+await test('fetch delivery allows live refresh only after acknowledgement and still rejects concurrent replay', async () => {
+  const r = runtime(); r.stage(); r.report();
+  const first = r.page.fetch(endpoint, { method: 'POST', body });
+  await assert.rejects(r.page.fetch(endpoint, { method: 'POST', body }), /no longer available/);
+  assert.deepEqual(await (await first).json(), payload); assert.equal(r.count('fetch'), 0);
+  assert.equal(r.bridge.confirmLoaded(request.repUid), true);
+  const options = { method: 'POST', body };
+  assert.equal(r.page.fetch(endpoint, options), r.nativePromise);
+  assert.equal(r.calls.at(-1).args[1], options); assert.equal(r.count('fetch'), 1);
+  assert.equal(r.stage(), false);
+});
+
+await test('failed Response construction and pre-aborted fetch cannot unlock a ticket', async () => {
+  for (const failure of ['response-construction', 'aborted']) {
+    const r = runtime(); r.stage(); r.report();
+    if (failure === 'response-construction') {
+      r.page.Response = class { constructor() { throw new TypeError('synthetic-response-construction'); } };
+      assert.throws(() => r.page.fetch(endpoint, { method: 'POST', body }), /synthetic-response-construction/);
+    } else {
+      const controller = new AbortController(); controller.abort();
+      await assert.rejects(r.page.fetch(endpoint, { method: 'POST', body, signal: controller.signal }), error => error.name === 'AbortError');
+    }
+    assert.equal(r.bridge.confirmLoaded(request.repUid), false); assert.equal(r.count('fetch'), 0);
+  }
+});
+
+await test('native terminal review success refreshes current report after real owner acknowledgement', async () => {
+  const r = runtime(); const observed = acknowledgeThroughRealObserver(r); r.stage(); r.report();
+  xhr(r); await r.flush();
+  assert.equal(observed.observations.length, 1); assert.equal(observed.observations[0].outcome, 'complete');
+  const reportBody = JSON.stringify({ repUid: request.repUid, button: 'tjbg', currentReportStatusCode: '102502', finding: 'synthetic-only', opinion: 'synthetic-only' });
+  r.nativeResponses.push(new Response(JSON.stringify({ code: 200, data: true })));
+  const result = await r.page.fetch(`${origin}/api/ct/rays/rep/report`, { method: 'POST', body: reportBody });
+  assert.deepEqual(await result.json(), { code: 200, data: true });
+  assert.equal(r.calls.at(-1).args[1].body, reportBody);
+  const refreshed = xhr(r); assert.equal(refreshed.returned, 'native-send');
+  await r.flush();
+  assert.equal(refreshed.events.some(event => event.type === 'error'), false);
+  assert.equal(r.count('send'), 1); assert.equal(r.count('fetch'), 1);
+  assert.equal(r.stage(), false, 'refresh does not remove the auto acquisition tombstone');
+});
+
+await test('auto-save and submit-diagnosis requests preserve payload and native transport before acknowledgement', async () => {
+  const r = runtime(); r.stage(); r.report(); xhr(r); await r.flush();
+  for (const path of ['/api/ct/rays/rep/autoSaveRep', '/api/ct/rays/rep/report']) {
+    const value = JSON.stringify({ repUid: request.repUid, button: 'tjsh', currentReportStatusCode: '102502', sign: 'synthetic-only' });
+    assert.equal(xhr(r, { url: `${origin}${path}`, value }).returned, 'native-send');
+    assert.equal(r.calls.at(-1).args[0], value);
+    const options = { method: 'POST', body: value };
+    assert.equal(r.page.fetch(`${origin}${path}`, options), r.nativePromise);
+    assert.equal(r.calls.at(-1).args[1], options);
+  }
+  assert.equal(r.count('send'), 2); assert.equal(r.count('fetch'), 2);
+  const blocked = xhr(r); await r.flush(); assert.equal(blocked.xhr.status, 0, 'unacknowledged enter remains protected');
+});
+
+await test('real observer refuses loaded acknowledgement for wrong owner or response UID', async () => {
+  for (const data of [{ ...payload.data, reportDoc: 'synthetic-other-doctor' }, { ...payload.data, repUid: 'synthetic-other-report' }, { reportDoc: payload.data.reportDoc }]) {
+    const r = runtime(); acknowledgeThroughRealObserver(r); r.stage(body, JSON.stringify({ ...payload, data })); r.report();
+    xhr(r); await r.flush();
+    const repeated = xhr(r); await r.flush();
+    assert.equal(repeated.xhr.status, 0); assert.equal(r.count('send'), 0);
+  }
+});
+
+await test('late fetch abort prevents delayed real observer from acknowledging loaded state', async () => {
+  const r = runtime(); const observer = acknowledgeThroughRealObserver(r, { delayed: true }); r.stage(); r.report();
+  const controller = new AbortController();
+  const first = await r.page.fetch(endpoint, { method: 'POST', body, signal: controller.signal });
+  assert.deepEqual(await first.json(), payload); await r.flush();
+  assert.equal(observer.observations.length, 1, 'matching successful observation is waiting for acknowledgement');
+  controller.abort(); observer.acknowledge();
+  assert.equal(r.bridge.confirmLoaded(request.repUid), false);
+  await assert.rejects(r.page.fetch(endpoint, { method: 'POST', body }), /no longer available/);
+  assert.equal(r.count('fetch'), 0); assert.equal(r.stage(), false);
+});
+
+await test('fetch abort after real loaded acknowledgement does not revoke legitimate native refresh', async () => {
+  const r = runtime(); const observer = acknowledgeThroughRealObserver(r); r.stage(); r.report();
+  const controller = new AbortController();
+  const first = await r.page.fetch(endpoint, { method: 'POST', body, signal: controller.signal });
+  assert.deepEqual(await first.json(), payload); await r.flush();
+  assert.equal(observer.observations.length, 1);
+  assert.equal(r.bridge.confirmLoaded(request.repUid), false, 'real observer already acknowledged this ticket');
+  controller.abort();
+  const options = { method: 'POST', body };
+  assert.equal(r.page.fetch(endpoint, options), r.nativePromise);
+  assert.equal(r.count('fetch'), 1); assert.equal(r.calls.at(-1).args[1], options);
+  assert.equal(r.stage(), false);
+});
+
+await test('synchronous abort during Response creation cannot complete fetch delivery', async () => {
+  const r = runtime(); r.stage(); r.report(); const controller = new AbortController();
+  r.page.Response = class extends Response { constructor(...args) { super(...args); controller.abort(); } };
+  await assert.rejects(r.page.fetch(endpoint, { method: 'POST', body, signal: controller.signal }), error => error.name === 'AbortError');
+  assert.equal(r.bridge.confirmLoaded(request.repUid), false); assert.equal(r.count('fetch'), 0);
 });
 
 console.log(`passed ${tested} protocol-entry handoff cases`);

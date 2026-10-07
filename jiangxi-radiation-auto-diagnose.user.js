@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         江西省县域医共体 - 自动诊断候选
 // @namespace    local.jiangxi.radiation
-// @version      0.8.55
+// @version      0.8.56
 // @updateURL   https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @downloadURL https://raw.githubusercontent.com/kongji1/jiangxi-radiation-auto-diagnose/main/jiangxi-radiation-auto-diagnose.user.js
 // @description  以页面实时推送为主、轻量协议探测为兜底，按可配置规则识别后优先通过系统协议进入诊断；支持可控开发者诊断日志。
@@ -23,7 +23,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.8.55';
+  const SCRIPT_VERSION = '0.8.56';
 
   const AUTO_ENTRY_TIME_SLOTS = Object.freeze([
     { id: 'morning', label: '08:00–12:00', startMinutes: 8 * 60, endMinutes: 12 * 60, overnight: false },
@@ -2938,7 +2938,7 @@
     else developerLog('实时推送进入成功', { ...debugCandidate(d), source: 'websocket' });
   }
 
-  // 校验通过后提前取得最终进入响应，报告页复用完整响应；同一报告只请求一次。
+  // 初次进入提前取得一次并交接完整响应；确认载入后，原生报告刷新照常请求。
   // 旁听仍区分提前取得与原生页面载入，只有最终业务响应成功才确认进入。
   const REPORT_ENTRY_EVENT = 'jx-auto-diagnose-report-entry-observed';
   let reportEntryBridgeBound = false;
@@ -2998,12 +2998,17 @@
       ticket.text = ''; ticket.auth = ''; ticket.headers = null;
       if (ticket.timer) page.clearTimeout(ticket.timer);
       ticket.timer = null;
+      try { ticket.abortCleanup?.(); } catch (_) {}
+      ticket.abortCleanup = null;
     };
     const lookup = (body, requestHeaders = null) => {
       const payload = canonical(body), identity = session();
       if (!payload || !identity || reportId() !== payload.repUid) return null;
       const ticket = tickets.get(`${identity.key}|${payload.key}`);
       if (!ticket) return null;
+      // The initial native load was acknowledged for this report/session.
+      // Later native refreshes (including after terminal review) are live requests.
+      if (ticket.state === 'loaded') return null;
       if ((requestHeaders?.get('login-user-key') && requestHeaders.get('login-user-key') !== identity.account) ||
           (requestHeaders?.get('authorization') && requestHeaders.get('authorization') !== identity.auth) ||
           (requestHeaders?.get('workcode') && requestHeaders.get('workcode') !== identity.workstation)) {
@@ -3025,8 +3030,8 @@
       const value = type === 'readystatechange' ? new page.Event(type) : new page.ProgressEvent(type, { lengthComputable: true, loaded, total: loaded });
       xhr.dispatchEvent(value);
     };
-    const synthesize = (xhr, meta, response) => {
-      const state = { phase: 1, response, cancelled: false, failed: !response, timer: null, json: null };
+    const synthesize = (xhr, meta, response, ticket = null) => {
+      const state = { phase: 1, response, ticket, cancelled: false, failed: !response, timer: null, json: null };
       if (response && xhr.responseType === 'json') { try { state.json = JSON.parse(response.text); } catch (_) {} }
       meta.synthetic = state;
       Object.defineProperties(xhr, {
@@ -3052,7 +3057,10 @@
           if (phase === 3) { event(xhr, 'progress', response.bytes); if (state.cancelled) return; }
         }
         event(xhr, 'load', response.bytes);
-        if (!state.cancelled) event(xhr, 'loadend', response.bytes);
+        if (!state.cancelled) {
+          event(xhr, 'loadend', response.bytes);
+          if (!state.cancelled && ticket?.state === 'consumed') ticket.deliveryCompleted = true;
+        }
       }, 0);
     };
     const wrapped = {
@@ -3086,7 +3094,7 @@
         // A ticket proves the POST already happened. Unsupported consumers and
         // expired/spent tickets must fail locally, never repeat the lock POST.
         const supported = meta.async && ['', 'text', 'json'].includes(this.responseType || '');
-        synthesize(this, meta, supported ? consume(ticket) : null);
+        synthesize(this, meta, supported ? consume(ticket) : null, ticket);
         return undefined;
       },
       abort: function () {
@@ -3094,6 +3102,7 @@
         if (!state) return native.abort.apply(this, arguments);
         const active = !state.cancelled && state.phase > 0 && state.phase < 4;
         state.cancelled = true; state.failed = true; state.response = null; state.json = null;
+        if (state.ticket?.state === 'consumed') state.ticket.deliveryCompleted = false;
         if (state.timer) page.clearTimeout(state.timer);
         if (active) { state.phase = 4; event(this, 'readystatechange'); event(this, 'abort'); event(this, 'loadend'); }
         state.phase = 0;
@@ -3114,6 +3123,22 @@
       if (!value) return Promise.reject(new TypeError('Entry handoff is no longer available'));
       const response = new page.Response(value.text, { status: value.status, statusText: value.statusText, headers: value.headers });
       Object.defineProperty(response, 'url', { configurable: true, value: value.url });
+      const revokeDelivery = () => {
+        if (ticket.state !== 'consumed') return;
+        ticket.deliveryCompleted = false;
+        erase(ticket);
+      };
+      if (typeof signal?.addEventListener === 'function') {
+        ticket.abortCleanup = () => signal.removeEventListener('abort', revokeDelivery);
+        signal.addEventListener('abort', revokeDelivery, { once: true });
+      }
+      // Construction can synchronously abort the signal before the listener
+      // is attached. An abort before loaded acknowledgement remains fail closed.
+      if (signal?.aborted) {
+        revokeDelivery();
+        return Promise.reject(new page.DOMException('Request aborted', 'AbortError'));
+      }
+      if (ticket.state === 'consumed') ticket.deliveryCompleted = true;
       return Promise.resolve(response);
     };
     const wrappedFetch = function (input, options) {
@@ -3167,10 +3192,21 @@
           JSON.parse(responseText);
           const responseHeaders = new page.Headers(typeof headers === 'string' ? headers.split(/\r?\n/).filter(Boolean).map(line => { const at = line.indexOf(':'); if (at <= 0) throw new Error('invalid-header'); return [line.slice(0, at), line.slice(at + 1).trim()]; }) : headers);
           const response = new page.Response(responseText, { status: Number(status), statusText: String(statusText || ''), headers: responseHeaders });
-          const ticket = { id: `entry-handoff:${Date.now()}:${++serial}`, key, auth: identity.auth, text: responseText, bytes, status: response.status, statusText: response.statusText || (response.status === 200 ? 'OK' : ''), headers: responseHeaders, url: new URL(endpoint, page.location.href).href, state: 'pending', expiresAt: Date.now() + Math.max(1, Math.min(15000, Number(ttl) || 15000)), timer: null };
+          const ticket = { id: `entry-handoff:${Date.now()}:${++serial}`, key, repUid: payload.repUid, sessionKey: identity.key, auth: identity.auth, text: responseText, bytes, status: response.status, statusText: response.statusText || (response.status === 200 ? 'OK' : ''), headers: responseHeaders, url: new URL(endpoint, page.location.href).href, state: 'pending', deliveryCompleted: false, expiresAt: Date.now() + Math.max(1, Math.min(15000, Number(ttl) || 15000)), timer: null };
           ticket.timer = page.setTimeout(() => { if (ticket.state === 'pending') ticket.state = 'expired'; erase(ticket); }, ticket.expiresAt - Date.now());
           tickets.set(key, ticket); return ticket.id;
         } catch (_) { return false; }
+      },
+      confirmLoaded: repUid => {
+        const identity = session();
+        if (!identity || typeof repUid !== 'string' || !repUid || reportId() !== repUid) return false;
+        let confirmed = false;
+        for (const ticket of tickets.values()) {
+          if (ticket.sessionKey === identity.key && ticket.repUid === repUid && ticket.state === 'consumed' && ticket.deliveryCompleted === true) {
+            ticket.state = 'loaded'; erase(ticket); confirmed = true;
+          }
+        }
+        return confirmed;
       },
       discard: id => { const ticket = Array.from(tickets.values()).find(value => value.id === id); if (!ticket) return false; ticket.state = 'discarded'; erase(ticket); return true; },
       peek: id => { const ticket = Array.from(tickets.values()).find(value => value.id === id); return ticket ? { id: ticket.id, expiresAt: ticket.expiresAt, pending: ticket.state === 'pending' && Date.now() < ticket.expiresAt } : null; }
@@ -3423,6 +3459,8 @@
         developerLog('报告进入后所属医生不匹配', {
           ...record, currentAccountName, reportOwnerMatches: false, reason: '最终进入响应的诊断医生与当前登录账号不同'
         }, { force: true });
+      } else if (currentAccountName && record.requestMethod === 'POST' && record.responseRepUid === repUid) {
+        try { pageWindow().__JX_PROTOCOL_ENTRY_HANDOFF__?.confirmLoaded?.(repUid); } catch (_) {}
       }
     }
     completeFinalEntryPending({ ...detail, repUid, endpointKind });
@@ -3541,7 +3579,6 @@
     if (document.documentElement) inject();
     else document.addEventListener('DOMContentLoaded', inject, { once: true });
   }
-
   async function scan() {
     if (!isMonitoringEnabled() || running || document.visibilityState === 'hidden') return;
     if (!accountAllowed()) return;

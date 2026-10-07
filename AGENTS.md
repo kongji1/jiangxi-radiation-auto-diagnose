@@ -8,7 +8,7 @@
 - 根目录 `jiangxi-radiation-auto-diagnose.user.js` 是生成产物。不要直接修改；用 `node tools/build-userscript.mjs --write` 生成，`--check` 检测漂移。
 - manifest 定义初始化顺序。17 段仍共享 IIFE 作用域；模块移动、共享声明、bootstrap 或未知文件变化必须全量验证。
 - `reference/app-bundles` 仅用于协议核对，不能直接修改。
-- 版本升级使用 `python -B tools/maintain-project.py version <版本>`，同步源码版本和状态，运行态历史不改写。
+- 版本升级使用 `python -B tools/maintain-project.py version --to <版本>`，先构建当前改动再升级，同步源码版本和状态，运行态历史不改写。
 
 ## 维护流程
 

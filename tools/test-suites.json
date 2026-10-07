@@ -12,6 +12,7 @@
     {"id":"schedule","runner":"node","path":"tests/auto-entry-schedule.test.mjs","includes":["src/01-schedule-defaults.js","src/08-entry-pending-dom.js","src/10-entry-protocol.js","src/15-settings-ui.js"],"dependsOn":["configuration"]},
     {"id":"retention","runner":"node","path":"tests/developer-retention.test.mjs","includes":["src/03-debug-journal.js","src/05-debug-events.js","src/15-settings-ui.js"],"dependsOn":["configuration"]},
     {"id":"report-observer","runner":"node","path":"tests/report-entry-observer.test.mjs","includes":["src/13-protocol-bridges.js"],"dependsOn":["final-pending","automatic-once"]},
+    {"id":"report-refresh-compat","runner":"node","path":"tests/report-refresh-compat.test.mjs","includes":["tools/report-refresh-compat.mjs"],"dependsOn":[]},
     {"id":"configuration","runner":"node","path":"tests/configuration-persistence.test.mjs","includes":["src/15-settings-ui.js"],"dependsOn":[]},
     {"id":"final-pending","runner":"node","path":"tests/final-entry-pending.test.mjs","includes":["src/08-entry-pending-dom.js","src/10-entry-protocol.js"],"dependsOn":[]},
     {"id":"locked-entry","runner":"node","path":"tests/locked-entry-hard-gate.test.mjs","includes":["src/07-candidate-rules.js","src/08-entry-pending-dom.js","src/10-entry-protocol.js","src/12-realtime-queue.js"],"dependsOn":[]},

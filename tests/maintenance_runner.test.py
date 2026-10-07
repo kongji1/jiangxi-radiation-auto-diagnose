@@ -309,6 +309,16 @@ class MaintenanceTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             runner.parser().parse_args(["test", "--all", "--changed"])
 
+    def test_diagnose_audit_is_opt_in_and_forwarded_to_existing_reader(self):
+        for options, audit in [([], False), (["--with-audit", "--date", "2026-10-07"], True)]:
+            with self.subTest(audit=audit), patch.object(runner.subprocess, "run", return_value=types.SimpleNamespace(returncode=0)) as execute:
+                self.assertEqual(runner.main(["diagnose", "--name", "synthetic-name", *options]), 0)
+                command = execute.call_args.args[0]
+                self.assertEqual("--with-audit" in command, audit)
+                self.assertEqual("--date" in command, audit)
+                self.assertIn("tools/diagnose-candidate.py", command)
+                self.assertEqual(execute.call_count, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

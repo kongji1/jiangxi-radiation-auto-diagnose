@@ -14,6 +14,7 @@ python -B .\tools\diagnose-candidate.py --name "客户姓名" --pretty
 
 ```powershell
 python -B .\tools\diagnose-candidate.py --name "客户姓名" --with-audit --date 2026-10-07 --pretty
+python -B .\tools\maintain-project.py diagnose --name "客户姓名" --with-audit --date 2026-10-07
 ```
 
 这会复用现有只读审计器，最多进行身份读取、指定姓名当天的窄列表与一份报告操作记录查询。没有全量扫描。当前原生查询限定最新 10 份列表结果；同名多份报告直接标为 `ambiguous-report`，不猜测某份报告。审计失败不会丢失本地诊断。服务端秒级日志与客户端毫秒日志未校准，不能据此断言其它账号早几百毫秒。

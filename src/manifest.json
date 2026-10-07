@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": "0.8.55",
+  "version": "0.8.56",
   "versionToken": "{{SCRIPT_VERSION}}",
   "output": "jiangxi-radiation-auto-diagnose.user.js",
   "modules": [
