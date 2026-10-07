@@ -1,0 +1,110 @@
+{
+  "schemaVersion": 1,
+  "version": "0.8.55",
+  "versionToken": "{{SCRIPT_VERSION}}",
+  "output": "jiangxi-radiation-auto-diagnose.user.js",
+  "modules": [
+    {
+      "id": "header",
+      "file": "src/00-header.js",
+      "order": 0,
+      "description": "用户脚本元数据和外层IIFE开头"
+    },
+    {
+      "id": "schedule-defaults",
+      "file": "src/01-schedule-defaults.js",
+      "order": 1,
+      "description": "自动进入时段与默认配置"
+    },
+    {
+      "id": "shared-state",
+      "file": "src/02-shared-state.js",
+      "order": 2,
+      "description": "运行/协议/日志的共享状态声明；调整需全量验证"
+    },
+    {
+      "id": "debug-journal",
+      "file": "src/03-debug-journal.js",
+      "order": 3,
+      "description": "持久化日志、滚动保留与多文档同步"
+    },
+    {
+      "id": "configuration",
+      "file": "src/04-configuration.js",
+      "order": 4,
+      "description": "配置迁移、规范化与保存"
+    },
+    {
+      "id": "debug-events",
+      "file": "src/05-debug-events.js",
+      "order": 5,
+      "description": "日志事件结构与候选上下文"
+    },
+    {
+      "id": "session-auth",
+      "file": "src/06-session-auth.js",
+      "order": 6,
+      "description": "会话请求头、协议登录、验证码与账号门禁"
+    },
+    {
+      "id": "candidate-rules",
+      "file": "src/07-candidate-rules.js",
+      "order": 7,
+      "description": "协议记录规范化、年龄/时间/检查/机构规则"
+    },
+    {
+      "id": "entry-pending-dom",
+      "file": "src/08-entry-pending-dom.js",
+      "order": 8,
+      "description": "页面操作解析、进入pending与诊断互斥"
+    },
+    {
+      "id": "record-list",
+      "file": "src/09-record-list.js",
+      "order": 9,
+      "description": "稳定报告识别、列表请求及窄查询"
+    },
+    {
+      "id": "entry-protocol",
+      "file": "src/10-entry-protocol.js",
+      "order": 10,
+      "description": "严格进入校验、最终协议取得和导航"
+    },
+    {
+      "id": "entry-ledger-lifecycle",
+      "file": "src/11-entry-ledger-lifecycle.js",
+      "order": 11,
+      "description": "每报告持久防重与候选生命周期"
+    },
+    {
+      "id": "realtime-queue",
+      "file": "src/12-realtime-queue.js",
+      "order": 12,
+      "description": "列表处理、轻量探测、实时队列调度"
+    },
+    {
+      "id": "protocol-bridges",
+      "file": "src/13-protocol-bridges.js",
+      "order": 13,
+      "description": "最终响应交接、原生旁听与WebSocket桥"
+    },
+    {
+      "id": "runtime",
+      "file": "src/14-runtime.js",
+      "order": 14,
+      "description": "扫描、定时、自检、选项更新与启动"
+    },
+    {
+      "id": "settings-ui",
+      "file": "src/15-settings-ui.js",
+      "order": 15,
+      "description": "配置面板、方案和主题交互"
+    },
+    {
+      "id": "bootstrap",
+      "file": "src/16-bootstrap.js",
+      "order": 16,
+      "description": "SPA路由、生命周期启动与收尾"
+    }
+  ]
+}

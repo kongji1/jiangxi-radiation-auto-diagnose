@@ -1,19 +1,20 @@
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
 import vm from 'node:vm';
+import { createSourceHarness } from './helpers/source-harness.mjs';
 
-const source = fs.readFileSync(new URL('../jiangxi-radiation-auto-diagnose.user.js', import.meta.url), 'utf8');
-function block(startText, endText) {
-  const start = source.indexOf(startText), end = source.indexOf(endText, start);
-  assert(start >= 0 && end > start, `missing source block ${startText}`);
-  return source.slice(start, end);
-}
-const ledger = block('  const AUTOMATIC_ENTRY_PREFIX', '  function rememberData(d)');
-const dataKeys = block('  function dataKeys(d)', '  function candidatePatientName(d)');
-const pending = block('  const FINAL_ENTRY_PENDING_KEY', '  function isMonitorRoute(');
-const protocol = block("  let protocolFinalEntryRepUid = ''", '  async function enterDiagnosis(d)');
-const entry = block('  async function enterDiagnosis(d)', '  const REPORT_STATUS_CODES');
-const observer = block('  function onReportEntryObserved(event)', '  function installReportEntryBridge()');
+const sourceHarness = createSourceHarness();
+const selections = [
+  { module: 'entry-ledger-lifecycle', names: ['dataKeys', 'AUTOMATIC_ENTRY_PREFIX', 'AUTOMATIC_ENTRY_RESERVATION_MS',
+    'automaticEntryCache', 'automaticEntrySequence', 'automaticEntryKey', 'automaticEntryStorageKey', 'readAutomaticEntry',
+    'writeAutomaticEntry', 'automaticEntryBlockReason', 'reserveAutomaticEntry', 'consumeAutomaticEntry', 'releaseAutomaticEntry',
+    'restoreAutomaticEntryHistory', 'dataSeen'] },
+  { module: 'entry-pending-dom', names: ['FINAL_ENTRY_PENDING_KEY', 'FINAL_ENTRY_PENDING_MS', 'finalEntryPending',
+    'finalEntryPendingLoaded', 'finalEntryPendingTimer', 'persistFinalEntryPending', 'finishFinalEntryPending',
+    'scheduleFinalEntryPendingExpiry', 'pendingFinalEntryState', 'beginFinalEntryPending', 'maintainFinalEntryPendingRoute',
+    'completeFinalEntryPending', 'existingRadiationRouter', 'navigateToDiagnosisReport', 'entryDiagnosisLockActive'] },
+  { module: 'entry-protocol' },
+  { module: 'protocol-bridges', names: ['onReportEntryObserved'] },
+];
 const prefix = 'jx-radiation-auto-entry-once-v1:';
 const storageKey = id => prefix + encodeURIComponent(`rep:${id}`);
 const id = 'synthetic-final-report';
@@ -91,7 +92,7 @@ function runtime(options = {}) {
       return requestOptions.method === 'POST' ? result(finalPayload()) : result({ code: 200, data: true });
     }
   });
-  vm.runInContext(`${dataKeys}\n${ledger}\n${pending}\n${protocol}\n${entry}\n${observer}`, context);
+  sourceHarness.load(context, selections, { filename: 'protocol-final-entry:production-declarations' });
   const r = { context, page, root, router, bridge, user, cookies, account, config, requests, stages, discards, pushes, reloads, clicks, events,
     saves, refreshes, notices,
     setTime: value => { clock = value; }, setRoute: value => { url = new URL(value, url); },

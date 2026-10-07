@@ -25,7 +25,7 @@
   "source": "jiangxi-radiation-auto-diagnose.user.js",
   "version": "0.8.55",
   "snapshotDate": "2026-10-07",
-  "sourceOfTruth": "jiangxi-radiation-auto-diagnose.user.js",
+  "sourceOfTruth": "src/manifest.json + ordered src/*.js",
   "handoff": "docs/AI_HANDOFF.md",
   "protocol": "docs/PROTOCOL.md",
   "verification": "docs/VERIFICATION.md",
@@ -139,7 +139,9 @@
     "edgeLauncherScript": "start-edge-cdp.ps1",
     "updateMode": "hidden about:blank target through Edge standard CDP 9333; no visible Tampermonkey options editor",
     "candidateTimeline": "tools/read-candidate-debug-cdp.py --name <name>",
-    "candidateAudit": "tools/read-candidate-audit-cdp.py --name <name> --other-doctor <doctor>"
+    "candidateAudit": "tools/read-candidate-audit-cdp.py --name <name> --other-doctor <doctor>",
+    "maintenance": "tools/maintain-project.py",
+    "candidateDiagnosis": "tools/maintain-project.py diagnose --name <name>"
   },
   "autoEntrySchedule": {
     "slots": [
@@ -246,5 +248,46 @@
     "githubActionsCompletedAt": "2026-10-07T04:14:40Z",
     "githubActionsUrl": "https://github.com/kongji1/jiangxi-radiation-auto-diagnose/actions/runs/37570418894",
     "scope": "Windows and Linux CI validated the source commit; later verification-record-only commits preserve the identical userscript source"
+  },
+  "sourceManifest": "src/manifest.json",
+  "maintenanceArchitecture": {
+    "schemaVersion": 1,
+    "moduleCount": 17,
+    "manifest": "src/manifest.json",
+    "testRegistry": "tools/test-suites.json",
+    "architecture": "docs/ARCHITECTURE.md",
+    "currentHandoff": "docs/AI_HANDOFF.md",
+    "migrationBaselineVersion": "0.8.55",
+    "migrationBaselineSha256Lf": "e00c54332866974742a87b754bb99447070698216d0f8b21621df444ccf3e47a",
+    "businessBehaviorChange": false,
+    "sharedIife": true,
+    "validation": {
+      "recordedAt": "2026-10-07T05:18:13Z",
+      "readiness": "LOCAL_VERIFIED",
+      "registeredSuites": 24,
+      "fullTestPassed": true,
+      "fullTestElapsedMs": 40344,
+      "releaseFailureSuiteElapsedMs": 34187,
+      "sameContentChangedTestElapsedMs": 531,
+      "sameContentCachedSuites": 24,
+      "sourceHarnessTests": 15,
+      "candidateDiagnosticsTests": 39,
+      "maintenanceRunnerTests": 32,
+      "versionManagementTests": 15,
+      "readOnlyStatusElapsedMs": 593,
+      "cdpReady": true,
+      "currentRuntimeVerified": false,
+      "syntheticCandidateDiagnosis": {
+        "classification": "missing-observation",
+        "eventCount": 0,
+        "localReadMs": 171,
+        "serverRequestsRequested": false
+      },
+      "deploymentPerformed": false,
+      "publicationPerformed": false,
+      "cacheEvidenceScope": "Same-content cache measured immediately after full tests and before closeout documentation/state edits; content changes invalidate cache",
+      "scope": "Local architecture and isolated test verification; generated business bytes unchanged; historical runtime and publication records preserved",
+      "record": "docs/MAINTENANCE_UPGRADE_20261007.md"
+    }
   }
 }

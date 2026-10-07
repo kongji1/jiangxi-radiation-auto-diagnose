@@ -6,7 +6,7 @@ Tampermonkey 会读取用户脚本头部的 `@updateURL` 和 `@downloadURL`。�
 
 ## 当前状态
 
-2026-10-07 已重新确认：`kongji1/jiangxi-radiation-auto-diagnose` 为现有公开仓库，默认分支 `main`，当前连接有推送权限。本地 `origin` 指向该仓库，接管基线 `master` 与 `origin/main` 同为 `6eeefd8`。发布必须绑定这个已确认的远程，不能推送到未知地址。
+2026-10-07 已重新确认：`kongji1/jiangxi-radiation-auto-diagnose` 为现有公开仓库，默认分支 `main`，当前连接有推送权限。本地 `origin` 指向该仓库，提交以当前 `git rev-parse HEAD` 和 `git ls-remote origin` 为准。发布必须绑定这个已确认的远程，不能推送到未知地址。
 
 旧记录中的“仓库 404／需要创建仓库”已失效。仓库存在不等于新版本已发布；每次交付仍需分别确认远端提交、Raw 内容、Actions 和当前页面运行版本。
 
@@ -35,7 +35,7 @@ OCR 默认端口为 `18766`。启动脚本会先检查端口归属；若检测�
 powershell -ExecutionPolicy Bypass -File tools/publish-github.ps1 -Repository kongji1/jiangxi-radiation-auto-diagnose
 ```
 
-脚本会先执行完整发布检查，再验证远端仓库、推送当前提交，并读取 Raw 文件确认版本为当前源码版本 `0.8.55`。仓库不存在或 Raw 仍返回 404 时会直接失败。
+脚本会先执行完整发布检查，再验证远端仓库、推送当前提交，并读取 Raw 文件确认版本与 `src/manifest.json.version` 一致。仓库不存在或 Raw 仍返回 404 时会直接失败。
 
 在项目根目录运行：
 

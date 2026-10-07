@@ -205,8 +205,8 @@ if (unlockedPolicy.isPendingReport({ statusCode: '102501', locked: true })) thro
 if (unlockedPolicy.isPendingReport({ statusCode: '102502', locked: true })) throw new Error('source contract failed: diagnosing status bypassed');
 if (!/raw\.githubusercontent\.com/.test(updateTool)) throw new Error('GitHub update tool missing raw URL');
 const hotUpdateHelper = fs.readFileSync(path.join(root, 'tools', 'configure-github-hot-update.mjs'), 'utf8');
-if (!/readFileSync\(sourcePath, 'utf8'\)/.test(hotUpdateHelper) || !/writeFileSync\(sourcePath, source/.test(hotUpdateHelper)) {
-  throw new Error('GitHub hot-update helper must use explicit UTF-8 Node I/O');
+if (!hotUpdateHelper.includes('src/00-header.js') || !hotUpdateHelper.includes("mode: 'write'") || !/readFileSync\(sourcePath, 'utf8'\)/.test(hotUpdateHelper)) {
+  throw new Error('GitHub hot-update helper must update header source then build with UTF-8 I/O');
 }
 const ocrServer = fs.readFileSync(path.join(root, 'tools', 'captcha_ocr_server.py'), 'utf8');
 if (!/def captcha_answer/.test(ocrServer) || !/fullmatch/.test(ocrServer) || !/127\.0\.0\.1/.test(ocrServer)) {
@@ -250,16 +250,23 @@ if (state.performance?.credentialValuesPersisted !== false) throw new Error('PRO
 if (state.performance?.cookieNameCaseInsensitive !== true) throw new Error('PROJECT_STATE cookie case-insensitive lookup mismatch');
 if (state.lastObservedRuntime?.statusProbe !== 'code=2002 repeated; auth headers absent in script context') throw new Error('PROJECT_STATE runtime evidence mismatch');
 if (state.lastObservedRuntime?.entryEventsObserved !== 0) throw new Error('PROJECT_STATE runtime entry evidence mismatch');
-if (!readme.includes(`源码版本：\`${metadataVersion}\``)) throw new Error('README version mismatch');
+const manifest = JSON.parse(fs.readFileSync(path.join(root, 'src/manifest.json'), 'utf8'));
+if (manifest.version !== metadataVersion) throw new Error('manifest version mismatch');
+if (!readme.includes('src/manifest.json')) throw new Error('README must link the version source');
 if (!readme.includes('127.0.0.1:18766')) throw new Error('README OCR endpoint missing');
 if (!readme.includes('GPT6_MAINTENANCE.md')) throw new Error('README GPT-6 guide missing');
 if (!gpt6Guide.includes('dispatchDelayMs') || !gpt6Guide.includes('diagnosisActive')) throw new Error('GPT-6 maintenance guide incomplete');
-if (!/source-contract\.test\.mjs/.test(releaseTool) || !/lifecycle-diagnostics\.test\.mjs/.test(releaseTool) || !/captcha_ocr\.test\.py/.test(releaseTool)) throw new Error('release verification tool incomplete');
+const registry = JSON.parse(fs.readFileSync(path.join(root, 'tools/test-suites.json'), 'utf8'));
+for (const id of ['source-contract', 'lifecycle', 'captcha-ocr', 'release-failure']) {
+  if (!registry.suites.some(suite => suite.id === id)) throw new Error(`maintenance registry misses ${id}`);
+}
+const localVerifier = fs.readFileSync(path.join(root, 'tools/invoke-local-verification.ps1'), 'utf8');
+if (!releaseTool.includes('invoke-local-verification.ps1') || !localVerifier.includes('maintain-project.py test --all')) throw new Error('release verification must delegate full registry tests');
 if (!/git ls-remote/.test(publishTool) || !/git push origin/.test(publishTool) || !/raw\.githubusercontent\.com/.test(publishTool)) throw new Error('GitHub publish tool incomplete');
-if (!/node --check/.test(quickMaintenance) || !/lifecycle-diagnostics\.test\.mjs/.test(quickMaintenance) || !/release-failure\.test\.mjs/.test(quickMaintenance) || !/READY/.test(quickMaintenance)) throw new Error('GPT-6 quick maintenance tool incomplete');
-if (!/RequireClean/.test(quickMaintenance) || !/workingTree/.test(quickMaintenance)) throw new Error('GPT-6 quick maintenance dirty mode incomplete');
+if (!quickMaintenance.includes('invoke-local-verification.ps1') || !localVerifier.includes('READY')) throw new Error('quick maintenance must use common verified runner');
+if (!quickMaintenance.includes('RequireClean') || !localVerifier.includes('workingTree')) throw new Error('quick maintenance clean-state proof incomplete');
 if (!quickGuide.includes('五分钟') || !quickGuide.includes('配置门禁快照') || !quickGuide.includes('认证上下文')) throw new Error('GPT-6 quick maintenance guide incomplete');
-if (!hotUpdateGuide.includes(`当前源码版本 \`${metadataVersion}\``) || !/raw\.githubusercontent\.com\/[^\s]+\/main\/jiangxi-radiation-auto-diagnose\.user\.js/.test(hotUpdateGuide)) {
+if (!hotUpdateGuide.includes('src/manifest.json') || !/raw\.githubusercontent\.com\/[^\s]+\/main\/jiangxi-radiation-auto-diagnose\.user\.js/.test(hotUpdateGuide)) {
   throw new Error('GitHub hot-update guide must identify the current source version and main-branch Raw file');
 }
 

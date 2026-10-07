@@ -1,18 +1,14 @@
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
 import vm from 'node:vm';
+import { createSourceHarness } from './helpers/source-harness.mjs';
 
-const source = fs.readFileSync(new URL('../jiangxi-radiation-auto-diagnose.user.js', import.meta.url), 'utf8');
-function block(startText, endText) {
-  const start = source.indexOf(startText), end = source.indexOf(endText, start);
-  assert(start >= 0 && end > start, `missing ${startText}`);
-  return source.slice(start, end);
-}
-const normalization = block('  function norm(s)', '  function pageWindow()');
-const dates = block('  function parseDate(text)', '  const REPORT_STATUS_NAMES');
-const names = block('  function candidatePatientName(d)', '  const AUTOMATIC_ENTRY_PREFIX');
-const resolver = block('  function stableReportRecordUid(record)', '  function radiationListPayload(');
-const apiResolver = block('  async function findRowRecordByApi(d)', '  async function protocolEnter(d)');
+const sourceHarness = createSourceHarness();
+const selections = [
+  { module: 'session-auth', names: ['norm'] },
+  { module: 'candidate-rules', names: ['parseDate'] },
+  { module: 'entry-ledger-lifecycle', names: ['candidatePatientName'] },
+  { module: 'record-list', names: ['stableReportRecordUid', 'reportRecordMatchScore', 'selectReportRecord', 'findRowRecord', 'findRowRecordByApi'] },
+];
 const candidate = (extra = {}) => ({ patientName: 'synthetic-person', exam: 'synthetic-exam', applyTime: '2026-10-07 09:00:10', ...extra });
 const record = (uid = 'synthetic-report', extra = {}) => ({ repUid: uid, patName: 'synthetic-person',
   examName: 'synthetic-exam', checkinTime: '2026-10-07 09:00:10', ...extra });
@@ -27,7 +23,7 @@ function runtime(records = []) {
     queryBodyRows: doc => doc === pageDocument ? pageRows : rows,
     fetchRadiationRecords: async options => { requests.push(options); return records; }
   });
-  vm.runInContext(`${normalization}\n${dates}\n${names}\n${resolver}\n${apiResolver}`, context);
+  sourceHarness.load(context, selections, { filename: 'report-record-resolution:production-declarations' });
   return { context, rows, pageRows, requests,
     withRow(data, values) {
       const row = { __vueParentComponent: { props: { records: values } } };

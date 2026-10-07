@@ -4,8 +4,9 @@
 
 ## 当前版本
 
-- 源码版本：`0.8.55`
-- 主文件：[jiangxi-radiation-auto-diagnose.user.js](./jiangxi-radiation-auto-diagnose.user.js)
+- 源码版本：以 `src/manifest.json` 的 `version` 为准。
+- 源码模块：[src/manifest.json](./src/manifest.json)
+- 安装产物：[jiangxi-radiation-auto-diagnose.user.js](./jiangxi-radiation-auto-diagnose.user.js)
 - 协议参考包：[reference/app-bundles](./reference/app-bundles)
 - 交接入口：[docs/AI_HANDOFF.md](./docs/AI_HANDOFF.md)
 - GPT-6 维护入口：[docs/GPT6_MAINTENANCE.md](./docs/GPT6_MAINTENANCE.md)
@@ -13,6 +14,20 @@
 - 协议说明：[docs/PROTOCOL.md](./docs/PROTOCOL.md)
 - 验证记录：[docs/VERIFICATION.md](./docs/VERIFICATION.md)
 - 变更记录：[docs/CHANGELOG.md](./docs/CHANGELOG.md)
+
+## 维护架构已升级
+
+业务源码按职责拆为 17 个模块，构建生成一个安装脚本。版本、测试登记和接管入口集中维护；业务字节与 0.8.55 迁移基线一致。
+
+```powershell
+python -B tools/maintain-project.py status
+python -B tools/maintain-project.py diagnose --name "客户姓名"
+node tools/build-userscript.mjs --write
+python -B tools/maintain-project.py test --changed
+python -B tools/maintain-project.py deploy
+```
+
+改哪里见 [ARCHITECTURE.md](./docs/ARCHITECTURE.md)，命令/缓存/退出码见 [MAINTENANCE_COMMANDS.md](./docs/MAINTENANCE_COMMANDS.md)，本次实测见 [MAINTENANCE_UPGRADE_20261007.md](./docs/MAINTENANCE_UPGRADE_20261007.md)。源码仍共享原 IIFE，需要依赖隔离时按实际改动逐步迁移。
 
 ## 0.8.55 本次变更与验证状态
 
@@ -89,7 +104,7 @@
 ## 维护原则
 
 - 先阅读 `docs/AI_HANDOFF.md`，再修改脚本。
-- 以主文件为唯一源码来源；`reference/app-bundles` 只用于核对业务端接口，不直接修改。
+- 以 src/manifest.json 登记的模块为唯一源码来源；`reference/app-bundles` 只用于核对业务端接口，不直接修改。
 - 修改后先运行 `node --check .\\jiangxi-radiation-auto-diagnose.user.js`。
 - 不能把“源码已更新”当成“Tampermonkey 已加载”；必须在浏览器中确认脚本版本或实际日志。
 - 不使用与本项目无关的 CTMW/EDW 探测脚本；不把临时密钥、Cookie、患者信息或截图放入项目。
