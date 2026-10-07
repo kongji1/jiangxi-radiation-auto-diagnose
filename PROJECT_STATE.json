@@ -288,6 +288,23 @@
       "cacheEvidenceScope": "Same-content cache measured immediately after full tests and before closeout documentation/state edits; content changes invalidate cache",
       "scope": "Local architecture and isolated test verification; generated business bytes unchanged; historical runtime and publication records preserved",
       "record": "docs/MAINTENANCE_UPGRADE_20261007.md"
+    },
+    "sourcePublication": {
+      "verifiedAt": "2026-10-07T05:35:16Z",
+      "architectureCommit": "d4b58f9d087c08473c3c07ffb6c5665e07c7de14",
+      "remoteMainCommit": "80fa98744d060ab575a54962488d134b89df1ed4",
+      "localHeadMatchesRemote": true,
+      "githubActionsRunId": 37576404787,
+      "githubActionsHeadCommit": "80fa98744d060ab575a54962488d134b89df1ed4",
+      "githubActionsStatus": "completed",
+      "githubActionsConclusion": "success",
+      "linuxCompletedAt": "2026-10-07T05:27:50Z",
+      "windowsCompletedAt": "2026-10-07T05:28:39Z",
+      "githubActionsUrl": "https://github.com/kongji1/jiangxi-radiation-auto-diagnose/actions/runs/37576404787",
+      "rawSourceSha256Lf": "e00c54332866974742a87b754bb99447070698216d0f8b21621df444ccf3e47a",
+      "tampermonkeyReinstalled": false,
+      "clinicalPageRefreshed": false,
+      "scope": "Source publication and CI confirmed for the exact remote commit; historical local validation/runtime records remain unchanged; later documentation commits require independent publication evidence"
     }
   }
 }

@@ -12,11 +12,11 @@
 
 ## 维护流程
 
-1. `maintain-project.py status` 核实源码/Git/当前 Edge 9333 运行态；不要据状态文件推断当前加载版本。
-2. 客户异常优先 `maintain-project.py diagnose --name "客户姓名"`，默认只读本地日志，不刷新或进入、不发业务请求。
-3. 定位单一模块改动，构建后运行 `maintain-project.py test --changed`。新增测试必须登记 `tools/test-suites.json`，遗漏即失败。
-4. 共享/未知改动自动退回全量；发布必须 `test --all`，本地/CI/PowerShell 同用登记表，禁止复制测试列表。
-5. 业务字节改变时再 `deploy`。报告页不刷新；`SAVED_PENDING_LOAD` 不是运行已更新。
+1. `python -B tools/maintain-project.py status` 核实源码/Git/当前 Edge 9333 运行态；不要据状态文件推断当前加载版本。
+2. 客户异常优先 `python -B tools/maintain-project.py diagnose --name "客户姓名"`，默认只读本地日志，不刷新或进入、不发业务请求。
+3. 定位单一模块改动，构建后运行 `python -B tools/maintain-project.py test --changed`。新增测试必须登记 `tools/test-suites.json`，遗漏即失败。
+4. 共享/未知改动自动退回全量；发布必须 `python -B tools/maintain-project.py test --all`，本地/CI/PowerShell 同用登记表，禁止复制测试列表。
+5. 业务字节改变时再 `python -B tools/maintain-project.py deploy`。报告页不刷新；`SAVED_PENDING_LOAD` 不是运行已更新。
 6. 需要发布时用现有 `tools/publish-github.ps1`，另核实 Raw/远端 CI，不能把本地测试当成发布完成。
 
 ## 运行约束

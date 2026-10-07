@@ -36,7 +36,15 @@ Windows 本机 Python 3.11、Node 24，使用标准 Edge CDP `127.0.0.1:9333`。
 
 合成姓名诊断从已有同源日志镜像读取，`serverRequestsRequested=false`；没有创建标签页、刷新、修改配置、进入、重新锁定或请求病例服务端列表。`--with-audit` 是另外显式选择的窄只读操作记录查询，默认不执行。
 
-本次业务安装字节未改变，没有实际 Tampermonkey 保存或重载，也没有远端发布。部署竞态、报告页保护、安装 hash 和运行启动时间约束使用离线夹具验证。三秒热加载目标本次未实测；不能由 531 ms 测试缓存命中推导实际热加载速度。
+本次业务安装字节未改变，没有实际 Tampermonkey 保存或重载。部署竞态、报告页保护、安装 hash 和运行启动时间约束使用离线夹具验证。三秒热加载目标本次未实测；不能由 531 ms 测试缓存命中推导实际热加载速度。
+
+## 源码发布与远端 CI（2026-10-07 05:35:16 UTC 核实）
+
+- 架构提交 `d4b58f9d087c08473c3c07ffb6c5665e07c7de14` 及片段边界契约修正提交 `80fa98744d060ab575a54962488d134b89df1ed4` 已推送。`git ls-remote origin refs/heads/main` 的远端 SHA 与本地 HEAD 均为后者。
+- [GitHub Actions 37576404787](https://github.com/kongji1/jiangxi-radiation-auto-diagnose/actions/runs/37576404787) 的 `head_sha` 精确等于上述远端 HEAD，分支 `main`、事件 `push`，状态 `completed`、结论 `success`。
+- Linux `validate (ubuntu-latest)` 于 `2026-10-07T05:27:50Z` 完成，Windows `validate (windows-latest)` 于 `2026-10-07T05:28:39Z` 完成，均为 `success`。
+- 从该精确提交读取的安装产物 Raw 按 LF 计算仍为 SHA-256 `e00c54332866974742a87b754bb99447070698216d0f8b21621df444ccf3e47a`。源码发布及双平台 CI 已确认；本轮仍未重新安装 Tampermonkey 或刷新临床报告页，不能把 CI 通过当成当前页面运行证据。
+- 上述证据对应已发布的 `80fa987`；本节及状态摘要的后续文档提交需各自核实远端 HEAD/CI，不能借用该次运行覆盖新提交。
 
 ## 后续维护
 
