@@ -14,7 +14,11 @@
     "ribExclusionPersisted": true,
     "reportReloaded": false,
     "ocrServiceHealth": "not connected on 18766; local regression used SkipOcrHealth",
-    "publication": "6c43ac4 pushed to main; Raw 0.8.54 matches source SHA256; Windows CI newline fixture fix requires a new run",
+    "publication": "b3c1ab1 pushed to main; Raw 0.8.54 matches source SHA256; Linux and Windows CI passed",
+    "validatedCodeCommit": "b3c1ab1c6b6e61313342dae6269b8453486d88e2",
+    "githubActionsRunId": 37562351825,
+    "githubActionsConclusion": "success",
+    "githubActionsCompletedAt": "2026-10-07T02:32:13Z",
     "record": "docs/CLOSEOUT_20261007.md"
   },
   "project": "江西省县域医共体 - 自动诊断候选",
