@@ -193,7 +193,7 @@
     "restoredOtherOwnerReportRecords": 1,
     "reportReloaded": false,
     "realClinicalEntryVerification": "Pending normal next eligible candidate; no synthetic clinical lock or enter requests sent",
-    "githubPublication": "0.8.55 not yet pushed; prior 0.8.54 closeout remains historical"
+    "githubPublication": "0.8.55 source commit a2364627d1d532ba4201b0e2ea58125828e8f7a0 pushed to main; canonical Raw matches installed/local LF SHA256; dual-platform Actions passed"
   },
   "tampermonkeyInstalledVersion": "0.8.55",
   "previousRuntimeVerification": {
@@ -235,5 +235,16 @@
     "nativePostDurationMs": 367,
     "serverAndClientClocksCalibrated": false,
     "repair": "Immediate idle realtime dispatch and in-flight finally wake; guarded early final POST and complete one-use native response handoff; confirmed own acquisition only; permanent skip on other-owner refusal; uncertain result or failed UI handoff pauses automatic entry"
+  },
+  "latestPublicationVerification": {
+    "sourceVersion": "0.8.55",
+    "validatedCodeCommit": "a2364627d1d532ba4201b0e2ea58125828e8f7a0",
+    "rawSourceMatchesInstalledAndLocal": true,
+    "sourceSha256Lf": "e00c54332866974742a87b754bb99447070698216d0f8b21621df444ccf3e47a",
+    "githubActionsRunId": 37570418894,
+    "githubActionsConclusion": "success",
+    "githubActionsCompletedAt": "2026-10-07T04:14:40Z",
+    "githubActionsUrl": "https://github.com/kongji1/jiangxi-radiation-auto-diagnose/actions/runs/37570418894",
+    "scope": "Windows and Linux CI validated the source commit; later verification-record-only commits preserve the identical userscript source"
   }
 }
